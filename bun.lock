@@ -40,6 +40,9 @@
       "dependencies": {
         "@scribe/shared": "workspace:*",
         "@tanstack/react-router": "^1.95.0",
+        "@trivorn/nav-shell": "^0.2.1",
+        "@trivorn/theme-client": "0.2.2",
+        "lucide-react": "^0.500.0",
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
         "socket.io-client": "^4.8.0",
@@ -265,6 +268,10 @@
     "@tanstack/router-core": ["@tanstack/router-core@1.171.6", "", { "dependencies": { "@tanstack/history": "1.162.0", "cookie-es": "^3.0.0", "seroval": "^1.5.4", "seroval-plugins": "^1.5.4" } }, "sha512-Ol6DQ+j6rf/rPVELIzo8LHwOQV2KL+zry3b+39kL/GKrt7YId52WJRAFMzuseY4XceSW+PU7sG/Cc1QkwJr0hg=="],
 
     "@tanstack/store": ["@tanstack/store@0.9.3", "", {}, "sha512-8reSzl/qGWGGVKhBoxXPMWzATSbZLZFWhwBAFO9NAyp0TxzfBP0mIrGb8CP8KrQTmvzXlR/vFPPUrHTLBGyFyw=="],
+
+    "@trivorn/nav-shell": ["@trivorn/nav-shell@0.2.1", "https://repo.trivorn.org/@trivorn/nav-shell/-/nav-shell-0.2.1.tgz", { "peerDependencies": { "lucide-react": ">=0.400", "react": ">=18" } }, "sha512-T45gjbSSWE4wPWPxWpb5eXHWeG6HfGXMSIq/Pm4rTUtYL8J6/bkFthK95TrThmekZpzcAzW+dbvmVbiwcKw6vQ=="],
+
+    "@trivorn/theme-client": ["@trivorn/theme-client@0.2.2", "https://repo.trivorn.org/@trivorn/theme-client/-/theme-client-0.2.2.tgz", { "peerDependencies": { "react": ">=18" }, "optionalPeers": ["react"] }, "sha512-JQGwbOMpe48S5EL9c/5iL4374btBDYcoxScD5p/0dL/Z8RyMPAGAJqtIetK3YKxGYiQOqXNvssLNFHvTtnSrOA=="],
 
     "@types/babel__core": ["@types/babel__core@7.20.5", "", { "dependencies": { "@babel/parser": "^7.20.7", "@babel/types": "^7.20.7", "@types/babel__generator": "*", "@types/babel__template": "*", "@types/babel__traverse": "*" } }, "sha512-qoQprZvz5wQFJwMDqeseRXWv3rqMvhgpbXFfVyWhbx9X47POIA6i/+dXefEmZKoAgOaTdaIgNSMqMIU61yRyzA=="],
 
@@ -539,6 +546,8 @@
     "lodash.merge": ["lodash.merge@4.6.2", "", {}, "sha512-0KpjqXRVvrYyCsX1swR/XTK0va6VQkQM6MNo7PqW77ByjAhoARA8EfrP1N4+KlKj8YS0ZUCtRT/YUuhyYDujIQ=="],
 
     "lru-cache": ["lru-cache@5.1.1", "", { "dependencies": { "yallist": "^3.0.2" } }, "sha512-KpNARQA3Iwv+jTA0utUVVbrh+Jlrr1Fv0e56GGzAFOXN7dk/FviaDW8LHmK52DlcH4WP2n6gI8vN1aesBFgo9w=="],
+
+    "lucide-react": ["lucide-react@0.500.0", "", { "peerDependencies": { "react": "^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0" } }, "sha512-IyGvnYOSBKiF7rFI3p0tDw4ZI+TKnn1b5LPF2/q3NBmA7zYaDagevs1eMNyPRpKdFXxgma6rEu6+2ylJaaGnJA=="],
 
     "math-intrinsics": ["math-intrinsics@1.1.0", "", {}, "sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g=="],
 

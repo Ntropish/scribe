@@ -2,7 +2,7 @@ import { Link, createRoute, useParams } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 import { Route as rootRoute } from "./__root";
 import { api, ApiError } from "../api";
-import { useAuth, type AuthState } from "../auth-hook";
+import { useAuth, type AuthState } from "../auth-context";
 import {
   useRecorder,
   type LineEvent,
@@ -136,9 +136,14 @@ function RecorderControls({ recorder }: { recorder: RecorderApi }) {
     );
   }
   if (recorder.state === "stopping") return <span>stopping</span>;
-  if (recorder.state === "error" && recorder.errorMessage) {
+  if (recorder.state === "error") {
     return (
-      <span className="scribe-error" style={{ padding: "0 0.6rem" }}>{recorder.errorMessage}</span>
+      <>
+        <button onClick={() => void recorder.start()}>Try again</button>
+        {recorder.errorMessage && (
+          <span className="scribe-error" style={{ padding: "0 0.6rem" }}>{recorder.errorMessage}</span>
+        )}
+      </>
     );
   }
   return null;
@@ -321,7 +326,7 @@ function SessionDetail() {
 }
 
 function adminFlag(auth: AuthState): boolean {
-  return auth.status === "signed-in" && auth.user.groups.includes("admin");
+  return auth.user?.groups.includes("admin") ?? false;
 }
 
 export const Route = createRoute({
