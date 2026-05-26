@@ -415,8 +415,13 @@ function openServiceWs(url: string): Promise<WebSocket> {
 }
 
 async function handleStart(io: IO, socket: ServerSocket, payload: unknown, ack: AckFn | undefined) {
+  console.warn(`[scribe] start: enter socket=${socket.id} url=${env.whisperStreamUrl}`);
   const ctx = await guardStart(socket, payload, ack);
-  if (!ctx) return;
+  if (!ctx) {
+    console.warn("[scribe] start: guard rejected");
+    return;
+  }
+  console.warn(`[scribe] start: opening service WS at ${env.whisperStreamUrl}`);
   let ws: WebSocket;
   try {
     ws = await openServiceWs(env.whisperStreamUrl);
@@ -424,6 +429,7 @@ async function handleStart(io: IO, socket: ServerSocket, payload: unknown, ack: 
     console.error("[scribe] could not open whisper-stream WS:", err);
     return emitErr(socket, "service_unavailable", "whisper-stream is unreachable", ack);
   }
+  console.warn("[scribe] start: service WS open, sending start");
   ws.send(JSON.stringify({
     type: "start",
     ...(ctx.language ? { language: ctx.language } : {}),
@@ -431,6 +437,7 @@ async function handleStart(io: IO, socket: ServerSocket, payload: unknown, ack: 
   }));
   const capture = await createCaptureRow(ctx.session.id);
   const nextIdx = await nextLineIndex(ctx.session.id);
+  console.warn(`[scribe] start: capture ${capture.id} created, acking`);
   const state: CaptureState = {
     io,
     sessionId: ctx.session.id,
@@ -523,6 +530,12 @@ export function attachSocketIO(httpServer: HttpServer): IO {
     next();
   });
 
-  io.on("connection", (socket) => bindSocketHandlers(io, socket));
+  io.on("connection", (socket) => {
+    console.warn(`[scribe] socket connected: ${socket.id} sub=${socket.data.auth?.subject}`);
+    socket.on("disconnect", (reason) => {
+      console.warn(`[scribe] socket disconnected: ${socket.id} reason=${reason}`);
+    });
+    bindSocketHandlers(io, socket);
+  });
   return io;
 }
