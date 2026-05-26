@@ -1,5 +1,5 @@
 import { Link, createRoute, useNavigate, useParams } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Route as rootRoute } from "./__root";
 import { api, ApiError } from "../api";
 
@@ -35,7 +35,7 @@ function SpaceDetail() {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
 
-  async function loadSpace() {
+  const loadSpace = useCallback(async () => {
     try {
       const data = await api.get<Space>(`/api/spaces/${encodeURIComponent(slug)}`);
       setSpace(data);
@@ -43,9 +43,9 @@ function SpaceDetail() {
       if (err instanceof ApiError) setError(err.status === 403 ? "Access denied" : err.message);
       else setError(String(err));
     }
-  }
+  }, [slug]);
 
-  async function loadSessions() {
+  const loadSessions = useCallback(async () => {
     const params = new URLSearchParams();
     if (q) params.set("q", q);
     if (from) params.set("from", from);
@@ -58,15 +58,15 @@ function SpaceDetail() {
       if (err instanceof ApiError) setError(err.message);
       else setError(String(err));
     }
-  }
+  }, [slug, q, from, to]);
 
   useEffect(() => {
     void loadSpace();
-  }, [slug]);
+  }, [loadSpace]);
 
   useEffect(() => {
     if (space) void loadSessions();
-  }, [space?.slug]);
+  }, [space, loadSessions]);
 
   async function newSession() {
     try {

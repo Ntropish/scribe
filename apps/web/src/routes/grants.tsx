@@ -1,5 +1,5 @@
 import { Link, createRoute, useParams } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Route as rootRoute } from "./__root";
 import { api, ApiError } from "../api";
 
@@ -17,7 +17,7 @@ function Grants() {
   const [groupInput, setGroupInput] = useState("");
   const [roleInput, setRoleInput] = useState<"owner" | "editor" | "viewer">("viewer");
 
-  async function load() {
+  const load = useCallback(async () => {
     try {
       const data = await api.get<Grant[]>(`/api/spaces/${encodeURIComponent(slug)}/grants`);
       setGrants(data);
@@ -26,11 +26,11 @@ function Grants() {
       if (err instanceof ApiError) setError(err.message);
       else setError(String(err));
     }
-  }
+  }, [slug]);
 
   useEffect(() => {
     void load();
-  }, [slug]);
+  }, [load]);
 
   async function setGrant(group: string, role: "owner" | "editor" | "viewer") {
     try {

@@ -99,6 +99,26 @@ const sessions = new Hono<{ Variables: { auth: AuthContext } }>();
 
 sessions.use("*", authMiddleware);
 
+async function listSessionsForSpace(
+  spaceId: string,
+  filters: { from: string | null; to: string | null; q: string | null },
+): Promise<DbSessionRow[]> {
+  const sql = getPostgresClient();
+  return sql<DbSessionRow[]>`
+    SELECT
+      s.id, s.space_id, sp.slug AS space_slug, s.title, s.state,
+      s.started_at, s.ended_at, s.finalized_at, s.finalized_by_sub,
+      s.created_by_sub, s.created_at, s.updated_at
+    FROM sessions s
+    INNER JOIN spaces sp ON sp.id = s.space_id
+    WHERE s.space_id = ${spaceId}
+      AND (${filters.from}::timestamptz IS NULL OR s.started_at >= ${filters.from}::timestamptz)
+      AND (${filters.to}::timestamptz IS NULL OR s.started_at <= ${filters.to}::timestamptz)
+      AND (${filters.q}::text IS NULL OR s.title ILIKE '%' || ${filters.q} || '%')
+    ORDER BY s.started_at DESC
+  `;
+}
+
 sessions.get("/spaces/:slug/sessions", async (c) => {
   const auth = getAuth(c);
   const space = await loadSpaceBySlug(c.req.param("slug"));
@@ -117,23 +137,12 @@ sessions.get("/spaces/:slug/sessions", async (c) => {
   if (!parsed.success) {
     return c.json({ error: "invalid query", issues: parsed.error.issues }, 400);
   }
-  const { from, to, q } = parsed.data;
 
-  const sql = getPostgresClient();
-  const rows = await sql<DbSessionRow[]>`
-    SELECT
-      s.id, s.space_id, sp.slug AS space_slug, s.title, s.state,
-      s.started_at, s.ended_at, s.finalized_at, s.finalized_by_sub,
-      s.created_by_sub, s.created_at, s.updated_at
-    FROM sessions s
-    INNER JOIN spaces sp ON sp.id = s.space_id
-    WHERE s.space_id = ${space.id}
-      AND (${from ?? null}::timestamptz IS NULL OR s.started_at >= ${from ?? null}::timestamptz)
-      AND (${to ?? null}::timestamptz IS NULL OR s.started_at <= ${to ?? null}::timestamptz)
-      AND (${q ?? null}::text IS NULL OR s.title ILIKE '%' || ${q ?? null} || '%')
-    ORDER BY s.started_at DESC
-  `;
-
+  const rows = await listSessionsForSpace(space.id, {
+    from: parsed.data.from ?? null,
+    to: parsed.data.to ?? null,
+    q: parsed.data.q ?? null,
+  });
   return c.json(rows.map(toSession));
 });
 

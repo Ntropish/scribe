@@ -33,26 +33,17 @@ interface SearchRow {
   started_at: string;
 }
 
-const search = new Hono<{ Variables: { auth: AuthContext } }>();
+interface SearchArgs {
+  q: string;
+  space: string | null;
+  from: string | null;
+  to: string | null;
+  limit: number;
+}
 
-search.use("*", authMiddleware);
-
-search.get("/", async (c) => {
-  const auth = getAuth(c);
-  const parsed = querySchema.safeParse({
-    q: c.req.query("q"),
-    space: c.req.query("space"),
-    from: c.req.query("from") ?? undefined,
-    to: c.req.query("to") ?? undefined,
-    limit: c.req.query("limit") ?? undefined,
-  });
-  if (!parsed.success) {
-    return c.json({ error: "invalid query", issues: parsed.error.issues }, 400);
-  }
-  const { q, space, from, to, limit } = parsed.data;
-
+async function runSearch(auth: AuthContext, args: SearchArgs): Promise<SearchRow[]> {
   const sql = getPostgresClient();
-  const rows = await sql<SearchRow[]>`
+  return sql<SearchRow[]>`
     SELECT
       l.id AS line_id,
       l.session_id,
@@ -62,7 +53,7 @@ search.get("/", async (c) => {
       ts_headline(
         'english',
         l.text,
-        websearch_to_tsquery('english', ${q}),
+        websearch_to_tsquery('english', ${args.q}),
         'StartSel=[[, StopSel=]], MaxFragments=2, MaxWords=12, MinWords=3'
       ) AS snippet,
       COALESCE(
@@ -89,10 +80,10 @@ search.get("/", async (c) => {
       ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'editor' THEN 1 ELSE 2 END
       LIMIT 1
     ) sg ON true
-    WHERE l.text_search @@ websearch_to_tsquery('english', ${q})
-      AND (${from ?? null}::timestamptz IS NULL OR s.started_at >= ${from ?? null}::timestamptz)
-      AND (${to ?? null}::timestamptz IS NULL OR s.started_at <= ${to ?? null}::timestamptz)
-      AND (${space ?? null}::text IS NULL OR sp.slug = ${space ?? null})
+    WHERE l.text_search @@ websearch_to_tsquery('english', ${args.q})
+      AND (${args.from}::timestamptz IS NULL OR s.started_at >= ${args.from}::timestamptz)
+      AND (${args.to}::timestamptz IS NULL OR s.started_at <= ${args.to}::timestamptz)
+      AND (${args.space}::text IS NULL OR sp.slug = ${args.space})
       AND sp.archived_at IS NULL
       AND (
         ${isAdmin(auth)}
@@ -101,12 +92,37 @@ search.get("/", async (c) => {
         OR sp.created_by_sub = ANY(${auth.managedAgents})
         OR sg.role IS NOT NULL
       )
-    ORDER BY ts_rank(l.text_search, websearch_to_tsquery('english', ${q})) DESC,
+    ORDER BY ts_rank(l.text_search, websearch_to_tsquery('english', ${args.q})) DESC,
              s.started_at DESC,
              l.start_ms ASC
-    LIMIT ${limit}
+    LIMIT ${args.limit}
   `;
+}
 
+const search = new Hono<{ Variables: { auth: AuthContext } }>();
+
+search.use("*", authMiddleware);
+
+search.get("/", async (c) => {
+  const auth = getAuth(c);
+  const parsed = querySchema.safeParse({
+    q: c.req.query("q"),
+    space: c.req.query("space"),
+    from: c.req.query("from") ?? undefined,
+    to: c.req.query("to") ?? undefined,
+    limit: c.req.query("limit") ?? undefined,
+  });
+  if (!parsed.success) {
+    return c.json({ error: "invalid query", issues: parsed.error.issues }, 400);
+  }
+
+  const rows = await runSearch(auth, {
+    q: parsed.data.q,
+    space: parsed.data.space ?? null,
+    from: parsed.data.from ?? null,
+    to: parsed.data.to ?? null,
+    limit: parsed.data.limit,
+  });
   return c.json({ results: rows, next_cursor: null });
 });
 

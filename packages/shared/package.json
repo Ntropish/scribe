@@ -9,6 +9,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "test": "bun test src",
     "build": "echo 'shared exports TS source directly; no build step'"
   },
   "dependencies": {

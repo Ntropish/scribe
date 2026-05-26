@@ -4,6 +4,12 @@ export class ApiError extends Error {
   }
 }
 
+function errorMessageFrom(body: unknown, fallback: string): string {
+  if (!body || typeof body !== "object" || !("error" in body)) return fallback;
+  const error = (body as { error: unknown }).error;
+  return typeof error === "string" ? error : fallback;
+}
+
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
@@ -16,11 +22,7 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const text = await res.text();
   const body = text ? safeParse(text) : null;
   if (!res.ok) {
-    const msg =
-      body && typeof body === "object" && "error" in body && typeof body.error === "string"
-        ? body.error
-        : `${res.status} ${res.statusText}`;
-    throw new ApiError(res.status, msg, body);
+    throw new ApiError(res.status, errorMessageFrom(body, `${res.status} ${res.statusText}`), body);
   }
   return body as T;
 }

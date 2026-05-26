@@ -87,6 +87,11 @@ async function broadcastLineUpdates(sessionIds: string[], lineIds: string[]): Pr
   }
 }
 
+function isUniqueViolation(err: unknown): boolean {
+  if (!err || typeof err !== "object" || !("code" in err)) return false;
+  return (err as { code?: string }).code === "23505";
+}
+
 const speakers = new Hono<{ Variables: { auth: AuthContext } }>();
 
 speakers.use("*", authMiddleware);
@@ -132,7 +137,7 @@ speakers.post("/spaces/:slug/speakers", async (c) => {
     if (!row) throw new Error("insert returned no row");
     return c.json(toSpeaker(row), 201);
   } catch (err) {
-    if (err && typeof err === "object" && "code" in err && err.code === "23505") {
+    if (isUniqueViolation(err)) {
       return c.json({ error: "speaker name already exists in this space" }, 409);
     }
     throw err;

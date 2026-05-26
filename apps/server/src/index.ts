@@ -2,8 +2,10 @@ import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import { join } from "node:path";
-import { env } from "./env";
+import { env, validateEnv } from "./env";
 import { runMigrations } from "./migrate";
+
+validateEnv();
 import { wellKnown } from "./well-known";
 import authRoutes from "./auth";
 import mcpRoutes from "./mcp";

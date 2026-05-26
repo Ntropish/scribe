@@ -26,10 +26,46 @@ function errorResult(message: string) {
   };
 }
 
-function createServer(auth: AuthContext): McpServer {
-  const server = new McpServer({ name: "scribe", version: "0.1.0" });
-  const sql = getPostgresClient();
+interface SpaceMinimal {
+  id: string;
+  created_by_sub: string;
+  visibility: "private" | "public";
+}
 
+async function loadSpaceMinimalBySlug(slug: string): Promise<SpaceMinimal | null> {
+  const sql = getPostgresClient();
+  const rows = await sql<SpaceMinimal[]>`
+    SELECT id, created_by_sub, visibility FROM spaces
+    WHERE slug = ${slug} AND archived_at IS NULL
+  `;
+  return rows[0] ?? null;
+}
+
+async function loadSpaceMinimalById(id: string): Promise<SpaceMinimal | null> {
+  const sql = getPostgresClient();
+  const rows = await sql<SpaceMinimal[]>`
+    SELECT id, created_by_sub, visibility FROM spaces
+    WHERE id = ${id} AND archived_at IS NULL
+  `;
+  return rows[0] ?? null;
+}
+
+async function isSpaceAccessible(space: SpaceMinimal, auth: AuthContext): Promise<boolean> {
+  if (isAdmin(auth)) return true;
+  if (space.visibility === "public") return true;
+  if (space.created_by_sub === auth.subject) return true;
+  if (auth.managedAgents.includes(space.created_by_sub)) return true;
+  if (auth.groups.length === 0) return false;
+  const sql = getPostgresClient();
+  const rows = await sql<{ space_id: string }[]>`
+    SELECT space_id FROM space_grants
+    WHERE space_id = ${space.id} AND group_name = ANY(${auth.groups})
+    LIMIT 1
+  `;
+  return rows.length > 0;
+}
+
+function registerListSpaces(server: McpServer, auth: AuthContext) {
   server.registerTool(
     "list_spaces",
     {
@@ -39,6 +75,7 @@ function createServer(auth: AuthContext): McpServer {
       inputSchema: {},
     },
     async () => {
+      const sql = getPostgresClient();
       const rows = await sql<{
         id: string;
         slug: string;
@@ -76,7 +113,9 @@ function createServer(auth: AuthContext): McpServer {
       return textResult(rows);
     },
   );
+}
 
+function registerListSessions(server: McpServer, auth: AuthContext) {
   server.registerTool(
     "list_sessions",
     {
@@ -85,20 +124,18 @@ function createServer(auth: AuthContext): McpServer {
         "Scoped to spaces the caller can access.",
       inputSchema: {
         space: z.string().describe("space slug"),
-        from: z.string().optional().describe("ISO timestamp, inclusive lower bound on started_at"),
-        to: z.string().optional().describe("ISO timestamp, inclusive upper bound on started_at"),
+        from: z.string().optional(),
+        to: z.string().optional(),
       },
     },
     async ({ space, from, to }) => {
-      const spaceRows = await sql<{ id: string; created_by_sub: string; visibility: "private" | "public" }[]>`
-        SELECT id, created_by_sub, visibility FROM spaces
-        WHERE slug = ${space} AND archived_at IS NULL
-      `;
-      const spaceRow = spaceRows[0];
+      const spaceRow = await loadSpaceMinimalBySlug(space);
       if (!spaceRow) return errorResult("space not found");
-      const accessible = await isSpaceAccessible(spaceRow, auth);
-      if (!accessible) return errorResult("forbidden");
+      if (!(await isSpaceAccessible(spaceRow, auth))) return errorResult("forbidden");
 
+      const sql = getPostgresClient();
+      const fromArg = from ?? null;
+      const toArg = to ?? null;
       const rows = await sql<{
         id: string;
         title: string;
@@ -109,25 +146,26 @@ function createServer(auth: AuthContext): McpServer {
         SELECT id, title, state, started_at, finalized_at
         FROM sessions
         WHERE space_id = ${spaceRow.id}
-          AND (${from ?? null}::timestamptz IS NULL OR started_at >= ${from ?? null}::timestamptz)
-          AND (${to ?? null}::timestamptz IS NULL OR started_at <= ${to ?? null}::timestamptz)
+          AND (${fromArg}::timestamptz IS NULL OR started_at >= ${fromArg}::timestamptz)
+          AND (${toArg}::timestamptz IS NULL OR started_at <= ${toArg}::timestamptz)
         ORDER BY started_at DESC
       `;
       return textResult(rows);
     },
   );
+}
 
+function registerGetSession(server: McpServer, auth: AuthContext) {
   server.registerTool(
     "get_session",
     {
       description:
         "Get one Scribe session including its resolved transcript lines. " +
         "Scoped to sessions in spaces the caller can access.",
-      inputSchema: {
-        id: z.string().uuid().describe("session id"),
-      },
+      inputSchema: { id: z.string().uuid().describe("session id") },
     },
     async ({ id }) => {
+      const sql = getPostgresClient();
       const sessionRows = await sql<{
         id: string;
         space_id: string;
@@ -144,14 +182,9 @@ function createServer(auth: AuthContext): McpServer {
       `;
       const sessionRow = sessionRows[0];
       if (!sessionRow) return errorResult("session not found");
-      const spaceRows = await sql<{ id: string; created_by_sub: string; visibility: "private" | "public" }[]>`
-        SELECT id, created_by_sub, visibility FROM spaces
-        WHERE id = ${sessionRow.space_id} AND archived_at IS NULL
-      `;
-      const spaceRow = spaceRows[0];
+      const spaceRow = await loadSpaceMinimalById(sessionRow.space_id);
       if (!spaceRow) return errorResult("session not found");
-      const accessible = await isSpaceAccessible(spaceRow, auth);
-      if (!accessible) return errorResult("forbidden");
+      if (!(await isSpaceAccessible(spaceRow, auth))) return errorResult("forbidden");
 
       const lines = await loadResolvedLinesForSession(sessionRow.id);
       return textResult({
@@ -167,25 +200,21 @@ function createServer(auth: AuthContext): McpServer {
       });
     },
   );
+}
 
+function registerListSpeakers(server: McpServer, auth: AuthContext) {
   server.registerTool(
     "list_speakers",
     {
       description: "List named speakers in a Scribe space the caller can access.",
-      inputSchema: {
-        space: z.string().describe("space slug"),
-      },
+      inputSchema: { space: z.string().describe("space slug") },
     },
     async ({ space }) => {
-      const spaceRows = await sql<{ id: string; created_by_sub: string; visibility: "private" | "public" }[]>`
-        SELECT id, created_by_sub, visibility FROM spaces
-        WHERE slug = ${space} AND archived_at IS NULL
-      `;
-      const spaceRow = spaceRows[0];
+      const spaceRow = await loadSpaceMinimalBySlug(space);
       if (!spaceRow) return errorResult("space not found");
-      const accessible = await isSpaceAccessible(spaceRow, auth);
-      if (!accessible) return errorResult("forbidden");
+      if (!(await isSpaceAccessible(spaceRow, auth))) return errorResult("forbidden");
 
+      const sql = getPostgresClient();
       const rows = await sql<{ id: string; name: string }[]>`
         SELECT id, name FROM speakers WHERE space_id = ${spaceRow.id}
         ORDER BY name ASC
@@ -193,7 +222,9 @@ function createServer(auth: AuthContext): McpServer {
       return textResult(rows);
     },
   );
+}
 
+function registerSearch(server: McpServer, auth: AuthContext) {
   server.registerTool(
     "search",
     {
@@ -202,13 +233,18 @@ function createServer(auth: AuthContext): McpServer {
         "Scoped to spaces the caller can access.",
       inputSchema: {
         q: z.string().min(1).describe("search phrase"),
-        space: z.string().optional().describe("optional space slug filter"),
-        from: z.string().optional().describe("ISO timestamp lower bound on session started_at"),
-        to: z.string().optional().describe("ISO timestamp upper bound on session started_at"),
+        space: z.string().optional(),
+        from: z.string().optional(),
+        to: z.string().optional(),
         limit: z.number().int().positive().max(200).optional(),
       },
     },
     async ({ q, space, from, to, limit }) => {
+      const sql = getPostgresClient();
+      const fromArg = from ?? null;
+      const toArg = to ?? null;
+      const spaceArg = space ?? null;
+      const limitArg = limit ?? 50;
       const rows = await sql<{
         line_id: string;
         session_id: string;
@@ -231,12 +267,7 @@ function createServer(auth: AuthContext): McpServer {
             websearch_to_tsquery('english', ${q}),
             'StartSel=[[, StopSel=]], MaxFragments=2, MaxWords=12, MinWords=3'
           ) AS snippet,
-          COALESCE(
-            sov.name,
-            ssm_session.name,
-            ssm_space.name,
-            l.raw_speaker_label
-          ) AS resolved_speaker,
+          COALESCE(sov.name, ssm_session.name, ssm_space.name, l.raw_speaker_label) AS resolved_speaker,
           s.started_at
         FROM lines l
         INNER JOIN sessions s ON s.id = l.session_id
@@ -256,9 +287,9 @@ function createServer(auth: AuthContext): McpServer {
           LIMIT 1
         ) sg ON true
         WHERE l.text_search @@ websearch_to_tsquery('english', ${q})
-          AND (${from ?? null}::timestamptz IS NULL OR s.started_at >= ${from ?? null}::timestamptz)
-          AND (${to ?? null}::timestamptz IS NULL OR s.started_at <= ${to ?? null}::timestamptz)
-          AND (${space ?? null}::text IS NULL OR sp.slug = ${space ?? null})
+          AND (${fromArg}::timestamptz IS NULL OR s.started_at >= ${fromArg}::timestamptz)
+          AND (${toArg}::timestamptz IS NULL OR s.started_at <= ${toArg}::timestamptz)
+          AND (${spaceArg}::text IS NULL OR sp.slug = ${spaceArg})
           AND sp.archived_at IS NULL
           AND (
             ${isAdmin(auth)}
@@ -270,31 +301,21 @@ function createServer(auth: AuthContext): McpServer {
         ORDER BY ts_rank(l.text_search, websearch_to_tsquery('english', ${q})) DESC,
                  s.started_at DESC,
                  l.start_ms ASC
-        LIMIT ${limit ?? 50}
+        LIMIT ${limitArg}
       `;
       return textResult({ results: rows, next_cursor: null });
     },
   );
-
-  return server;
 }
 
-async function isSpaceAccessible(
-  space: { id: string; created_by_sub: string; visibility: "private" | "public" },
-  auth: AuthContext,
-): Promise<boolean> {
-  if (isAdmin(auth)) return true;
-  if (space.visibility === "public") return true;
-  if (space.created_by_sub === auth.subject) return true;
-  if (auth.managedAgents.includes(space.created_by_sub)) return true;
-  if (auth.groups.length === 0) return false;
-  const sql = getPostgresClient();
-  const rows = await sql<{ space_id: string }[]>`
-    SELECT space_id FROM space_grants
-    WHERE space_id = ${space.id} AND group_name = ANY(${auth.groups})
-    LIMIT 1
-  `;
-  return rows.length > 0;
+function createServer(auth: AuthContext): McpServer {
+  const server = new McpServer({ name: "scribe", version: "0.1.0" });
+  registerListSpaces(server, auth);
+  registerListSessions(server, auth);
+  registerGetSession(server, auth);
+  registerListSpeakers(server, auth);
+  registerSearch(server, auth);
+  return server;
 }
 
 mcp.all("/*", async (c, next) => {
@@ -314,8 +335,7 @@ mcp.all("/*", async (c) => {
     sessionIdGenerator: () => randomUUID(),
   });
   await server.connect(transport);
-  const response = await transport.handleRequest(c.req.raw);
-  return response;
+  return transport.handleRequest(c.req.raw);
 });
 
 export default mcp;

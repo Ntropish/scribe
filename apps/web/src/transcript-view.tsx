@@ -1,14 +1,11 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
 import { api, ApiError } from "./api";
+import { formatMs, groupConsecutive, type LineGroup, type TranscriptLineLike } from "./transcript-utils";
 
-export interface TranscriptLine {
-  id: string;
-  line_index: number;
+export interface TranscriptLine extends TranscriptLineLike {
   start_ms: number;
   end_ms: number;
   text: string;
-  raw_speaker_label: string;
-  resolved_speaker: string;
 }
 
 interface Speaker {
@@ -32,35 +29,50 @@ interface PopoverState {
   hasOverride: boolean;
 }
 
-interface LineGroup {
-  rawLabel: string;
-  resolved: string;
-  lines: TranscriptLine[];
+function GroupHeader({
+  group,
+  canEdit,
+  finalized,
+  onOpen,
+}: {
+  group: LineGroup<TranscriptLine>;
+  canEdit: boolean;
+  finalized: boolean;
+  onOpen: () => void;
+}) {
+  const interactive = canEdit && !finalized;
+  return (
+    <div
+      className="scribe-line__speaker"
+      style={{ padding: "0.2rem 0.6rem", cursor: interactive ? "pointer" : "default" }}
+      onClick={interactive ? onOpen : undefined}
+      title={interactive ? "Click to assign this speaker" : undefined}
+    >
+      {group.resolved}
+      <span style={{ color: "var(--muted)", marginLeft: "0.4rem", fontWeight: "normal" }}>
+        ({group.rawLabel})
+      </span>
+    </div>
+  );
 }
 
-function formatMs(ms: number): string {
-  const totalSec = Math.max(0, Math.floor(ms / 1000));
-  const m = Math.floor(totalSec / 60).toString().padStart(2, "0");
-  const s = (totalSec % 60).toString().padStart(2, "0");
-  return `${m}:${s}`;
-}
-
-function groupConsecutive(lines: TranscriptLine[]): LineGroup[] {
-  const groups: LineGroup[] = [];
-  for (const line of lines) {
-    const tail = groups[groups.length - 1];
-    if (tail && tail.rawLabel === line.raw_speaker_label) {
-      tail.lines.push(line);
-      tail.resolved = line.resolved_speaker;
-    } else {
-      groups.push({
-        rawLabel: line.raw_speaker_label,
-        resolved: line.resolved_speaker,
-        lines: [line],
-      });
-    }
-  }
-  return groups;
+function LineRow({
+  line,
+  interactive,
+  onOpen,
+}: {
+  line: TranscriptLine;
+  interactive: boolean;
+  onOpen: () => void;
+}) {
+  const style: CSSProperties | undefined = interactive ? { cursor: "pointer" } : undefined;
+  return (
+    <div className="scribe-line" onClick={interactive ? onOpen : undefined} style={style}>
+      <div className="scribe-line__ts">{formatMs(line.start_ms)}</div>
+      <div className="scribe-line__speaker">{line.resolved_speaker}</div>
+      <div>{line.text}</div>
+    </div>
+  );
 }
 
 export function TranscriptView({
@@ -75,7 +87,7 @@ export function TranscriptView({
   const [popover, setPopover] = useState<PopoverState | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function loadSpeakers() {
+  const loadSpeakers = useCallback(async () => {
     try {
       const data = await api.get<Speaker[]>(`/api/spaces/${encodeURIComponent(spaceSlug)}/speakers`);
       setSpeakers(data);
@@ -83,76 +95,62 @@ export function TranscriptView({
       if (err instanceof ApiError) setError(err.message);
       else setError(String(err));
     }
-  }
+  }, [spaceSlug]);
 
   useEffect(() => {
     void loadSpeakers();
-  }, [spaceSlug]);
+  }, [loadSpeakers]);
 
   const sorted = useMemo(() => [...lines].sort((a, b) => a.line_index - b.line_index), [lines]);
   const groups = useMemo(() => groupConsecutive(sorted), [sorted]);
 
-  function openLine(line: TranscriptLine) {
-    if (!canEdit || finalized) return;
-    setPopover({
-      kind: "line",
-      rawLabel: line.raw_speaker_label,
-      lineId: line.id,
-      hasOverride: line.resolved_speaker !== line.raw_speaker_label,
-    });
-  }
+  const interactive = canEdit && !finalized;
 
-  function openGroup(group: LineGroup) {
-    if (!canEdit || finalized) return;
-    setPopover({ kind: "group", rawLabel: group.rawLabel, lineId: null, hasOverride: false });
+  if (groups.length === 0 && partial === null) {
+    return (
+      <div className="scribe-transcript">
+        {error && <div className="scribe-error">{error}</div>}
+        <p className="scribe-empty">No lines yet.</p>
+      </div>
+    );
   }
 
   return (
     <div className="scribe-transcript">
       {error && <div className="scribe-error">{error}</div>}
-      {groups.length === 0 && partial === null ? (
-        <p className="scribe-empty">No lines yet.</p>
-      ) : (
-        <>
-          {groups.map((group) => (
-            <div key={`${group.rawLabel}-${group.lines[0]!.id}`} style={{ marginBottom: "0.4rem" }}>
-              <div
-                className="scribe-line__speaker"
-                style={{ padding: "0.2rem 0.6rem", cursor: canEdit && !finalized ? "pointer" : "default" }}
-                onClick={() => openGroup(group)}
-                title={canEdit && !finalized ? "Click to assign this speaker" : undefined}
-              >
-                {group.resolved}
-                <span style={{ color: "var(--muted)", marginLeft: "0.4rem", fontWeight: "normal" }}>
-                  ({group.rawLabel})
-                </span>
-              </div>
-              {group.lines.map((line) => (
-                <div
-                  className="scribe-line"
-                  key={line.id}
-                  onClick={() => openLine(line)}
-                  style={
-                    canEdit && !finalized
-                      ? ({ cursor: "pointer" } as CSSProperties)
-                      : undefined
-                  }
-                >
-                  <div className="scribe-line__ts">{formatMs(line.start_ms)}</div>
-                  <div className="scribe-line__speaker">{line.resolved_speaker}</div>
-                  <div>{line.text}</div>
-                </div>
-              ))}
-            </div>
+      {groups.map((group) => (
+        <div key={`${group.rawLabel}-${group.lines[0]!.id}`} style={{ marginBottom: "0.4rem" }}>
+          <GroupHeader
+            group={group}
+            canEdit={canEdit}
+            finalized={finalized}
+            onOpen={() =>
+              setPopover({ kind: "group", rawLabel: group.rawLabel, lineId: null, hasOverride: false })
+            }
+          />
+          {group.lines.map((line) => (
+            <LineRow
+              key={line.id}
+              line={line}
+              interactive={interactive}
+              onOpen={() =>
+                setPopover({
+                  kind: "line",
+                  rawLabel: line.raw_speaker_label,
+                  lineId: line.id,
+                  hasOverride: line.resolved_speaker !== line.raw_speaker_label,
+                })
+              }
+            />
           ))}
-          {partial && (
-            <div className="scribe-line" style={{ opacity: 0.6 }}>
-              <div className="scribe-line__ts"></div>
-              <div className="scribe-line__speaker">...</div>
-              <div>{partial}</div>
-            </div>
-          )}
-        </>
+        </div>
+      ))}
+      {partial && (
+        <div className="scribe-line" style={{ opacity: 0.6 }}>
+          <div className="scribe-line__ts"></div>
+          <div className="scribe-line__speaker">...</div>
+          <div>{partial}</div>
+        </div>
       )}
       {popover && (
         <AssignPopover
@@ -179,20 +177,26 @@ interface PopoverProps {
   onSpeakersChanged: () => Promise<void>;
 }
 
-function AssignPopover({
-  spaceSlug,
-  sessionId,
-  state,
-  speakers,
-  onClose,
-  onSpeakersChanged,
-}: PopoverProps) {
+type Tier = "space" | "session" | "line";
+
+function tierUrl(tier: Tier, params: { slug: string; sessionId: string; lineId: string | null; rawLabel: string }): string {
+  switch (tier) {
+    case "space":
+      return `/api/spaces/${encodeURIComponent(params.slug)}/speaker-mappings/${encodeURIComponent(params.rawLabel)}`;
+    case "session":
+      return `/api/sessions/${encodeURIComponent(params.sessionId)}/speaker-mappings/${encodeURIComponent(params.rawLabel)}`;
+    case "line":
+      return `/api/lines/${encodeURIComponent(params.lineId!)}/speaker`;
+  }
+}
+
+function AssignPopover({ spaceSlug, sessionId, state, speakers, onClose, onSpeakersChanged }: PopoverProps) {
   const [selectedId, setSelectedId] = useState<string>(speakers[0]?.id ?? "");
   const [newName, setNewName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function ensureSpeaker(): Promise<string | null> {
+  async function ensureSpeakerId(): Promise<string | null> {
     if (newName.trim()) {
       try {
         const created = await api.post<Speaker>(
@@ -202,8 +206,7 @@ function AssignPopover({
         await onSpeakersChanged();
         return created.id;
       } catch (err) {
-        if (err instanceof ApiError) setError(err.message);
-        else setError(String(err));
+        setError(err instanceof ApiError ? err.message : String(err));
         return null;
       }
     }
@@ -214,67 +217,23 @@ function AssignPopover({
     return selectedId;
   }
 
-  async function applySpace() {
+  async function apply(tier: Tier) {
     if (busy) return;
     setBusy(true);
     setError(null);
-    const speakerId = await ensureSpeaker();
+    const speakerId = await ensureSpeakerId();
     if (!speakerId) {
       setBusy(false);
       return;
     }
     try {
       await api.put(
-        `/api/spaces/${encodeURIComponent(spaceSlug)}/speaker-mappings/${encodeURIComponent(state.rawLabel)}`,
+        tierUrl(tier, { slug: spaceSlug, sessionId, lineId: state.lineId, rawLabel: state.rawLabel }),
         { speaker_id: speakerId },
       );
       onClose();
     } catch (err) {
-      if (err instanceof ApiError) setError(err.message);
-      else setError(String(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function applySession() {
-    if (busy) return;
-    setBusy(true);
-    setError(null);
-    const speakerId = await ensureSpeaker();
-    if (!speakerId) {
-      setBusy(false);
-      return;
-    }
-    try {
-      await api.put(
-        `/api/sessions/${encodeURIComponent(sessionId)}/speaker-mappings/${encodeURIComponent(state.rawLabel)}`,
-        { speaker_id: speakerId },
-      );
-      onClose();
-    } catch (err) {
-      if (err instanceof ApiError) setError(err.message);
-      else setError(String(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function applyLine() {
-    if (busy || !state.lineId) return;
-    setBusy(true);
-    setError(null);
-    const speakerId = await ensureSpeaker();
-    if (!speakerId) {
-      setBusy(false);
-      return;
-    }
-    try {
-      await api.put(`/api/lines/${encodeURIComponent(state.lineId)}/speaker`, { speaker_id: speakerId });
-      onClose();
-    } catch (err) {
-      if (err instanceof ApiError) setError(err.message);
-      else setError(String(err));
+      setError(err instanceof ApiError ? err.message : String(err));
     } finally {
       setBusy(false);
     }
@@ -288,8 +247,7 @@ function AssignPopover({
       await api.put(`/api/lines/${encodeURIComponent(state.lineId)}/speaker`, { speaker_id: null });
       onClose();
     } catch (err) {
-      if (err instanceof ApiError) setError(err.message);
-      else setError(String(err));
+      setError(err instanceof ApiError ? err.message : String(err));
     } finally {
       setBusy(false);
     }
@@ -325,12 +283,12 @@ function AssignPopover({
         <div className="scribe-row" style={{ flexWrap: "wrap", gap: "0.4rem" }}>
           {state.kind === "group" ? (
             <>
-              <button onClick={applySpace} disabled={busy}>For this space</button>
-              <button className="secondary" onClick={applySession} disabled={busy}>For this session only</button>
+              <button onClick={() => apply("space")} disabled={busy}>For this space</button>
+              <button className="secondary" onClick={() => apply("session")} disabled={busy}>For this session only</button>
             </>
           ) : (
             <>
-              <button onClick={applyLine} disabled={busy}>Use for this line</button>
+              <button onClick={() => apply("line")} disabled={busy}>Use for this line</button>
               {state.hasOverride && (
                 <button className="secondary" onClick={clearLineOverride} disabled={busy}>
                   Clear override

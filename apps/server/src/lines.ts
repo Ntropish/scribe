@@ -1,5 +1,17 @@
 import { getPostgresClient } from "./infrastructure";
 
+// Pure resolution: line-override > session-mapping > space-mapping > raw label.
+// Extracted so it can be unit tested without a DB; mirrors the COALESCE in the
+// SQL queries.
+export function resolveSpeakerName(candidates: {
+  override: string | null;
+  sessionMapping: string | null;
+  spaceMapping: string | null;
+  rawLabel: string;
+}): string {
+  return candidates.override ?? candidates.sessionMapping ?? candidates.spaceMapping ?? candidates.rawLabel;
+}
+
 export interface ResolvedLine {
   id: string;
   sessionId: string;
