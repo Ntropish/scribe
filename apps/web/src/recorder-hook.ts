@@ -88,12 +88,24 @@ function teardownPipeline(pipeline: AudioPipeline | null) {
   for (const track of pipeline.stream.getTracks()) track.stop();
 }
 
-function wireSocket(socket: Socket, sessionId: string, opts: UseRecorderOptions, setError: (m: string) => void) {
+interface CallbackHandle {
+  onLine: (line: LineEvent) => void;
+  onLineUpdated: (line: LineEvent) => void;
+  onPartial: (partial: PartialEvent) => void;
+  onState: (state: StateEvent) => void;
+}
+
+function wireSocket(
+  socket: Socket,
+  sessionId: string,
+  cbRef: { current: CallbackHandle },
+  setError: (m: string) => void,
+) {
   socket.on("connect", () => socket.emit("join", { session_id: sessionId }));
-  socket.on("line", (evt: LineEvent) => opts.onLine(evt));
-  socket.on("line_updated", (evt: LineEvent) => opts.onLineUpdated(evt));
-  socket.on("partial", (evt: PartialEvent) => opts.onPartial(evt));
-  socket.on("state", (evt: StateEvent) => opts.onState(evt));
+  socket.on("line", (evt: LineEvent) => cbRef.current.onLine(evt));
+  socket.on("line_updated", (evt: LineEvent) => cbRef.current.onLineUpdated(evt));
+  socket.on("partial", (evt: PartialEvent) => cbRef.current.onPartial(evt));
+  socket.on("state", (evt: StateEvent) => cbRef.current.onState(evt));
   socket.on("error", (evt: { code: string; message: string }) => {
     setError(`${evt.code}: ${evt.message}`);
   });
@@ -124,6 +136,21 @@ export function useRecorder(opts: UseRecorderOptions): RecorderApi {
   const [recorderSocketId, setRecorderSocketId] = useState<string | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const pipelineRef = useRef<AudioPipeline | null>(null);
+  // Keep the latest callbacks in a ref so the socket listeners always invoke
+  // the current versions without forcing the effect to re-run (which would
+  // tear down and recreate the socket on every render).
+  const callbacksRef = useRef<CallbackHandle>({
+    onLine: opts.onLine,
+    onLineUpdated: opts.onLineUpdated,
+    onPartial: opts.onPartial,
+    onState: opts.onState,
+  });
+  callbacksRef.current = {
+    onLine: opts.onLine,
+    onLineUpdated: opts.onLineUpdated,
+    onPartial: opts.onPartial,
+    onState: opts.onState,
+  };
 
   useEffect(() => {
     // Force polling-only transport. Socket.IO's WebSocket upgrade fails
@@ -136,7 +163,7 @@ export function useRecorder(opts: UseRecorderOptions): RecorderApi {
       transports: ["polling"],
     });
     socketRef.current = socket;
-    wireSocket(socket, sessionId, opts, (msg) => {
+    wireSocket(socket, sessionId, callbacksRef, (msg) => {
       setErrorMessage(msg);
       if (msg.startsWith("recorder_busy:")) setState("error");
     });
@@ -145,7 +172,7 @@ export function useRecorder(opts: UseRecorderOptions): RecorderApi {
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [sessionId, opts]);
+  }, [sessionId]);
 
   useEffect(() => {
     function handle() {
