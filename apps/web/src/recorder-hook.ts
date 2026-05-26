@@ -62,8 +62,14 @@ interface AudioPipeline {
   stream: MediaStream;
 }
 
-async function buildAudioPipeline(onChunk: (buf: ArrayBuffer) => void): Promise<AudioPipeline> {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+async function acquireMicStream(): Promise<MediaStream> {
+  return navigator.mediaDevices.getUserMedia({ audio: true });
+}
+
+async function buildAudioPipeline(
+  stream: MediaStream,
+  onChunk: (buf: ArrayBuffer) => void,
+): Promise<AudioPipeline> {
   const audioCtx = new AudioContext();
   await audioCtx.audioWorklet.addModule("/scribe-audio-worklet.js");
   const source = audioCtx.createMediaStreamSource(stream);
@@ -155,16 +161,24 @@ export function useRecorder(opts: UseRecorderOptions): RecorderApi {
     if (!socket) return;
     setErrorMessage(null);
     setState("requesting_mic");
+    let stream: MediaStream | null = null;
     try {
-      pipelineRef.current = await buildAudioPipeline((buf) => {
-        if (socket.connected) socket.emit("audio", buf);
-      });
+      stream = await acquireMicStream();
       setState("connecting");
       await emitStartAck(socket, sessionId);
+      // Build the worklet only after the server has acked. Otherwise
+      // audio chunks start streaming before the start handler runs,
+      // saturating the (polling) transport and starving the ack.
+      pipelineRef.current = await buildAudioPipeline(stream, (buf) => {
+        if (socket.connected) socket.emit("audio", buf);
+      });
       setState("recording");
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : String(err));
       setState("error");
+      if (stream) {
+        for (const track of stream.getTracks()) track.stop();
+      }
       teardownPipeline(pipelineRef.current);
       pipelineRef.current = null;
     }
