@@ -120,7 +120,15 @@ export function useRecorder(opts: UseRecorderOptions): RecorderApi {
   const pipelineRef = useRef<AudioPipeline | null>(null);
 
   useEffect(() => {
-    const socket = io({ withCredentials: true, autoConnect: true });
+    // Force polling-only transport. Socket.IO's WebSocket upgrade fails
+    // through the Cloudflare tunnel ("closed before established"); polling
+    // works end-to-end. Audio frames travel as base64-in-XHR rather than
+    // raw WS frames; slower but unblocks the path.
+    const socket = io({
+      withCredentials: true,
+      autoConnect: true,
+      transports: ["polling"],
+    });
     socketRef.current = socket;
     wireSocket(socket, sessionId, opts, (msg) => {
       setErrorMessage(msg);
