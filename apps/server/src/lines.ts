@@ -152,6 +152,12 @@ export async function lineIdsForSessionLabel(
   return rows.map((r) => r.id);
 }
 
+// Whisper-stream's embedder produces 256-dim vectors as of the
+// wespeaker-voxceleb-resnet34-LM swap. Earlier sessions stored 512-dim
+// pyannote/embedding vectors; those are incompatible with the new model
+// and must be filtered out of enrollment pushes.
+export const EMBEDDING_DIM = 256;
+
 export async function gatherEmbeddingsForSpaceLabel(
   spaceId: string,
   rawLabel: string,
@@ -167,7 +173,7 @@ export async function gatherEmbeddingsForSpaceLabel(
   `;
   return rows
     .map((r) => r.embedding)
-    .filter((v): v is number[] => Array.isArray(v) && v.length > 0);
+    .filter((v): v is number[] => Array.isArray(v) && v.length === EMBEDDING_DIM);
 }
 
 export async function getSessionsForSpace(spaceId: string): Promise<string[]> {
