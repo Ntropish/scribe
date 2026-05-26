@@ -12,6 +12,7 @@ import {
   type SpaceCore,
 } from "./space-acl";
 import type { AuthContext } from "./middleware";
+import { loadResolvedLineById } from "./lines";
 
 interface SocketData {
   auth: AuthContext;
@@ -53,6 +54,7 @@ interface ServerToClientEvents {
   state: (payload: ServerStateEvent) => void;
   partial: (payload: { text: string; capture_id: string }) => void;
   line: (payload: ServerLineEvent) => void;
+  line_updated: (payload: ServerLineEvent) => void;
   error: (payload: { code: string; message: string }) => void;
 }
 
@@ -81,6 +83,12 @@ interface CaptureState {
 // Per-session in-process state. Only one capture (== one service WS) at a
 // time; a second client trying to start hits recorder_busy.
 const activeCaptures = new Map<string, CaptureState>();
+
+let ioInstance: IO | null = null;
+
+export function getIo(): IO | null {
+  return ioInstance;
+}
 
 const joinSchema = z.object({ session_id: z.string().uuid() });
 const startSchema = z.object({
@@ -305,6 +313,8 @@ function attachServiceListeners(state: CaptureState): void {
     if (frame.type === "final") {
       try {
         const row = await insertLine(state, frame as FinalFrame);
+        const resolved = await loadResolvedLineById(row.id);
+        const resolvedSpeaker = resolved?.resolvedSpeaker ?? row.raw_speaker_label;
         state.io.to(`session:${state.sessionId}`).emit("line", {
           id: row.id,
           session_id: state.sessionId,
@@ -314,7 +324,7 @@ function attachServiceListeners(state: CaptureState): void {
           end_ms: row.end_ms,
           text: row.text,
           raw_speaker_label: row.raw_speaker_label,
-          resolved_speaker: row.raw_speaker_label,
+          resolved_speaker: resolvedSpeaker,
           created_at: row.created_at,
         });
       } catch (err) {
@@ -346,6 +356,7 @@ export function attachSocketIO(httpServer: HttpServer): IO {
   const io = new SocketIOServer(httpServer, {
     cors: { origin: env.publicOrigin || true, credentials: true },
   }) as IO;
+  ioInstance = io;
 
   io.use(async (socket, next) => {
     const auth = await resolveAuthFromSocket(socket as ServerSocket);
