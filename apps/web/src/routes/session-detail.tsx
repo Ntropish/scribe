@@ -1,8 +1,14 @@
 import { Link, createRoute, useParams } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Route as rootRoute } from "./__root";
 import { api, ApiError } from "../api";
 import { useAuth } from "../auth-hook";
+import {
+  useRecorder,
+  type LineEvent,
+  type PartialEvent,
+  type StateEvent,
+} from "../recorder-hook";
 
 type SessionState = "recording" | "paused" | "stopped" | "finalized";
 
@@ -41,6 +47,9 @@ function SessionDetail() {
   const { slug, sessionId } = useParams({ from: "/spaces/$slug/sessions/$sessionId" });
   const auth = useAuth();
   const [session, setSession] = useState<SessionPayload | null>(null);
+  const [lines, setLines] = useState<Map<string, Line>>(new Map());
+  const [partial, setPartial] = useState<string | null>(null);
+  const [serverState, setServerState] = useState<SessionState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -48,6 +57,8 @@ function SessionDetail() {
     try {
       const data = await api.get<SessionPayload>(`/api/sessions/${encodeURIComponent(sessionId)}`);
       setSession(data);
+      setLines(new Map(data.lines.map((l) => [l.id, l])));
+      setServerState(data.state);
       setError(null);
     } catch (err) {
       if (err instanceof ApiError) setError(err.status === 403 ? "Access denied" : err.message);
@@ -58,6 +69,33 @@ function SessionDetail() {
   useEffect(() => {
     void load();
   }, [sessionId]);
+
+  const onLine = useCallback((evt: LineEvent) => {
+    setLines((prev) => {
+      const next = new Map(prev);
+      next.set(evt.id, toLine(evt));
+      return next;
+    });
+    setPartial(null);
+  }, []);
+
+  const onLineUpdated = useCallback((evt: LineEvent) => {
+    setLines((prev) => {
+      const next = new Map(prev);
+      next.set(evt.id, toLine(evt));
+      return next;
+    });
+  }, []);
+
+  const onPartial = useCallback((evt: PartialEvent) => {
+    setPartial(evt.text);
+  }, []);
+
+  const onState = useCallback((evt: StateEvent) => {
+    setServerState(evt.state);
+  }, []);
+
+  const recorder = useRecorder({ sessionId, onLine, onLineUpdated, onPartial, onState });
 
   async function finalize() {
     if (busy) return;
@@ -87,10 +125,17 @@ function SessionDetail() {
     }
   }
 
+  const sortedLines = useMemo(() => {
+    return [...lines.values()].sort((a, b) => a.line_index - b.line_index);
+  }, [lines]);
+
   if (error) return <div className="scribe-error">{error}</div>;
   if (!session) return <p className="scribe-empty">loading</p>;
 
   const isAdmin = auth.status === "signed-in" && auth.user.groups.includes("admin");
+  const effectiveState = serverState ?? session.state;
+  const recorderBusy = recorder.state === "error" && recorder.errorMessage?.startsWith("recorder_busy:");
+  const finalized = effectiveState === "finalized";
 
   return (
     <>
@@ -98,11 +143,11 @@ function SessionDetail() {
         <div className="scribe-header__row">
           <Link to="/spaces/$slug" params={{ slug }}>back</Link>
           <h1 style={{ margin: 0 }}>{session.title || "(untitled)"}</h1>
-          <span className={`scribe-state scribe-state--${session.state}`}>{session.state}</span>
+          <span className={`scribe-state scribe-state--${effectiveState}`}>{effectiveState}</span>
         </div>
         <div className="scribe-row">
           <span>Started {new Date(session.startedAt).toLocaleString()}</span>
-          {session.state !== "finalized" ? (
+          {!finalized ? (
             <button onClick={finalize} disabled={busy}>Finalize</button>
           ) : (
             <>
@@ -117,25 +162,73 @@ function SessionDetail() {
         </div>
       </div>
 
-      <div className="scribe-empty" style={{ marginTop: "1rem" }}>
-        Recorder controls land in the recorder UI bead.
-      </div>
+      {recorderBusy && (
+        <div className="scribe-error">
+          Another client is recording this session. <button className="secondary" onClick={() => window.location.reload()}>Refresh</button>
+        </div>
+      )}
+
+      {!finalized && !recorderBusy && (
+        <div className="scribe-row" style={{ margin: "0.6rem 0" }}>
+          {recorder.state === "idle" && <button onClick={() => void recorder.start()}>Record</button>}
+          {recorder.state === "requesting_mic" && <button disabled>Requesting mic</button>}
+          {recorder.state === "recording" && (
+            <>
+              <button className="secondary" onClick={recorder.pause}>Pause</button>
+              <button className="secondary" onClick={() => void recorder.stop()}>Stop</button>
+              <span style={{ color: "var(--danger)" }}>recording</span>
+            </>
+          )}
+          {recorder.state === "paused" && (
+            <>
+              <button onClick={recorder.resume}>Resume</button>
+              <button className="secondary" onClick={() => void recorder.stop()}>Stop</button>
+              <span style={{ color: "var(--muted)" }}>paused</span>
+            </>
+          )}
+          {recorder.state === "stopping" && <span>stopping</span>}
+          {recorder.state === "error" && recorder.errorMessage && (
+            <span className="scribe-error" style={{ padding: "0 0.6rem" }}>{recorder.errorMessage}</span>
+          )}
+        </div>
+      )}
 
       <div className="scribe-transcript">
-        {session.lines.length === 0 ? (
+        {sortedLines.length === 0 && partial === null ? (
           <p className="scribe-empty">No lines yet.</p>
         ) : (
-          session.lines.map((line) => (
-            <div className="scribe-line" key={line.id}>
-              <div className="scribe-line__ts">{formatMs(line.start_ms)}</div>
-              <div className="scribe-line__speaker">{line.resolved_speaker}</div>
-              <div>{line.text}</div>
-            </div>
-          ))
+          <>
+            {sortedLines.map((line) => (
+              <div className="scribe-line" key={line.id}>
+                <div className="scribe-line__ts">{formatMs(line.start_ms)}</div>
+                <div className="scribe-line__speaker">{line.resolved_speaker}</div>
+                <div>{line.text}</div>
+              </div>
+            ))}
+            {partial && (
+              <div className="scribe-line" style={{ opacity: 0.6 }}>
+                <div className="scribe-line__ts"></div>
+                <div className="scribe-line__speaker">...</div>
+                <div>{partial}</div>
+              </div>
+            )}
+          </>
         )}
       </div>
     </>
   );
+}
+
+function toLine(evt: LineEvent): Line {
+  return {
+    id: evt.id,
+    line_index: evt.line_index,
+    start_ms: evt.start_ms,
+    end_ms: evt.end_ms,
+    text: evt.text,
+    raw_speaker_label: evt.raw_speaker_label,
+    resolved_speaker: evt.resolved_speaker,
+  };
 }
 
 export const Route = createRoute({
