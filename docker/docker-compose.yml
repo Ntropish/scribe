@@ -3,13 +3,13 @@ name: scribe
 services:
   app:
     build:
-      context: ..
+      context: .
       dockerfile: apps/server/Dockerfile
       secrets:
         - bunfig
     image: scribe-app:latest
     container_name: scribe-app
-    env_file: ../.env
+    env_file: .env
     restart: unless-stopped
     networks:
       - default
@@ -38,7 +38,7 @@ services:
 
 secrets:
   bunfig:
-    file: ../.bunfig.toml
+    file: .bunfig.toml
 
 networks:
   default:
