@@ -43,7 +43,7 @@ Browser  ──(Socket.IO over WSS)──▶  Space: scribe app server (Hono + s
 - Browser talks to it as `scribe.trivorn.org` via the existing Cloudflare tunnel pattern.
 - Server-to-Postgres uses the shared cluster on Space (same as docs).
 - App server reaches whisper-stream on Desk over the home LAN. No tunnel, no public exposure of the python service. IP comes from `WHISPER_STREAM_URL` env var; LAN DHCP means the value can shift, so the deploy config reads it from the same place comms/docs read their secrets.
-- Whisper-stream stays on Desk. It's a service, not a deployable app. It needs the persistent-enrollment extension (B2a) and an autostart shim. Cross-tunnel auth / WSS aren't needed while the only client is Space-on-LAN.
+- Whisper-stream stays on Desk. It's a service, not a deployable app. It needs the persistent-enrollment extension (B2a). The service starts manually on Desk; autostart was considered and rejected. Cross-tunnel auth / WSS aren't needed while the only client is Space-on-LAN.
 
 ## Data model (Postgres on Space)
 
@@ -315,15 +315,13 @@ docker/      Dockerfile, docker-compose.yml
 
 ## Remaining open questions
 
-1. **Whisper-stream hardening scope.** Beads against whisper-stream that we
-   need before v1:
-   - Persistent speaker enrollment (B2a). Required.
-   - Autostart shim on Desk (so Scribe doesn't fall over on Desk reboot).
-     Strongly recommend.
+1. **Whisper-stream hardening scope.** Beads against whisper-stream that
+   we need before v1:
+   - Persistent speaker enrollment (B2a). Required. In flight.
+   - Autostart on Desk: rejected. Service starts manually.
    - Token auth at the WS handshake. Not strictly required since the only
-     consumer is Space-on-LAN, but a one-liner of "shared secret in env"
-     is cheap.
-   - WSS termination. Not needed for Space → Desk over LAN; defer.
+     consumer is Space-on-LAN; defer.
+   - WSS termination. Not needed for Space to Desk over LAN; defer.
    - Crash recovery on the service. Defer; app server handles reconnect.
 
 2. **Admin group.** Default to `groups.admin` as in docs unless you want a
