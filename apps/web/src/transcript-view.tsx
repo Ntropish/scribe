@@ -49,9 +49,6 @@ function GroupHeader({
       title={interactive ? "Click to assign this speaker" : undefined}
     >
       {group.resolved}
-      <span style={{ color: "var(--muted)", marginLeft: "0.4rem", fontWeight: "normal" }}>
-        ({group.rawLabel})
-      </span>
     </div>
   );
 }
@@ -69,7 +66,7 @@ function LineRow({
   return (
     <div className="scribe-line" onClick={interactive ? onOpen : undefined} style={style}>
       <div className="scribe-line__ts">{formatMs(line.start_ms)}</div>
-      <div className="scribe-line__speaker">{line.resolved_speaker}</div>
+      <div className="scribe-line__speaker"></div>
       <div>{line.text}</div>
     </div>
   );

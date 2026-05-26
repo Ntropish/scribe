@@ -153,14 +153,14 @@ export function useRecorder(opts: UseRecorderOptions): RecorderApi {
   };
 
   useEffect(() => {
-    // Force polling-only transport. Socket.IO's WebSocket upgrade fails
-    // through the Cloudflare tunnel ("closed before established"); polling
-    // works end-to-end. Audio frames travel as base64-in-XHR rather than
-    // raw WS frames; slower but unblocks the path.
+    // Polling first (works through CF without configuration), upgrade to
+    // WebSocket once connected. Confirmed the 101 upgrade response comes
+    // back cleanly through the tunnel; the earlier WS failures were a
+    // casualty of the socket-churn bug, not a transport issue.
     const socket = io({
       withCredentials: true,
       autoConnect: true,
-      transports: ["polling"],
+      transports: ["polling", "websocket"],
     });
     socketRef.current = socket;
     wireSocket(socket, sessionId, callbacksRef, (msg) => {
