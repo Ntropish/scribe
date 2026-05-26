@@ -1,5 +1,5 @@
 import { Link, createRoute, useParams } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Route as rootRoute } from "./__root";
 import { api, ApiError } from "../api";
 import { useAuth } from "../auth-hook";
@@ -9,6 +9,7 @@ import {
   type PartialEvent,
   type StateEvent,
 } from "../recorder-hook";
+import { TranscriptView, type TranscriptLine } from "../transcript-view";
 
 type SessionState = "recording" | "paused" | "stopped" | "finalized";
 
@@ -36,24 +37,40 @@ interface SessionPayload {
   lines: Line[];
 }
 
-function formatMs(ms: number): string {
-  const totalSec = Math.max(0, Math.floor(ms / 1000));
-  const m = Math.floor(totalSec / 60).toString().padStart(2, "0");
-  const s = (totalSec % 60).toString().padStart(2, "0");
-  return `${m}:${s}`;
+interface SpacePayload {
+  id: string;
+  slug: string;
+  memberRole: "owner" | "editor" | "viewer" | null;
+}
+
+function canEditFromRole(role: SpacePayload["memberRole"]): boolean {
+  return role === "owner" || role === "editor";
+}
+
+function toTranscriptLine(line: Line): TranscriptLine {
+  return {
+    id: line.id,
+    line_index: line.line_index,
+    start_ms: line.start_ms,
+    end_ms: line.end_ms,
+    text: line.text,
+    raw_speaker_label: line.raw_speaker_label,
+    resolved_speaker: line.resolved_speaker,
+  };
 }
 
 function SessionDetail() {
   const { slug, sessionId } = useParams({ from: "/spaces/$slug/sessions/$sessionId" });
   const auth = useAuth();
   const [session, setSession] = useState<SessionPayload | null>(null);
+  const [space, setSpace] = useState<SpacePayload | null>(null);
   const [lines, setLines] = useState<Map<string, Line>>(new Map());
   const [partial, setPartial] = useState<string | null>(null);
   const [serverState, setServerState] = useState<SessionState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  async function load() {
+  async function loadSession() {
     try {
       const data = await api.get<SessionPayload>(`/api/sessions/${encodeURIComponent(sessionId)}`);
       setSession(data);
@@ -66,14 +83,28 @@ function SessionDetail() {
     }
   }
 
+  async function loadSpace() {
+    try {
+      const data = await api.get<SpacePayload>(`/api/spaces/${encodeURIComponent(slug)}`);
+      setSpace(data);
+    } catch (err) {
+      if (err instanceof ApiError) setError(err.message);
+      else setError(String(err));
+    }
+  }
+
   useEffect(() => {
-    void load();
+    void loadSpace();
+  }, [slug]);
+
+  useEffect(() => {
+    void loadSession();
   }, [sessionId]);
 
   const onLine = useCallback((evt: LineEvent) => {
     setLines((prev) => {
       const next = new Map(prev);
-      next.set(evt.id, toLine(evt));
+      next.set(evt.id, evt);
       return next;
     });
     setPartial(null);
@@ -82,7 +113,7 @@ function SessionDetail() {
   const onLineUpdated = useCallback((evt: LineEvent) => {
     setLines((prev) => {
       const next = new Map(prev);
-      next.set(evt.id, toLine(evt));
+      next.set(evt.id, evt);
       return next;
     });
   }, []);
@@ -102,7 +133,7 @@ function SessionDetail() {
     setBusy(true);
     try {
       await api.post(`/api/sessions/${encodeURIComponent(sessionId)}/finalize`);
-      await load();
+      await loadSession();
     } catch (err) {
       if (err instanceof ApiError) setError(err.message);
       else setError(String(err));
@@ -116,7 +147,7 @@ function SessionDetail() {
     setBusy(true);
     try {
       await api.post(`/api/sessions/${encodeURIComponent(sessionId)}/unfinalize`);
-      await load();
+      await loadSession();
     } catch (err) {
       if (err instanceof ApiError) setError(err.message);
       else setError(String(err));
@@ -125,10 +156,6 @@ function SessionDetail() {
     }
   }
 
-  const sortedLines = useMemo(() => {
-    return [...lines.values()].sort((a, b) => a.line_index - b.line_index);
-  }, [lines]);
-
   if (error) return <div className="scribe-error">{error}</div>;
   if (!session) return <p className="scribe-empty">loading</p>;
 
@@ -136,6 +163,9 @@ function SessionDetail() {
   const effectiveState = serverState ?? session.state;
   const recorderBusy = recorder.state === "error" && recorder.errorMessage?.startsWith("recorder_busy:");
   const finalized = effectiveState === "finalized";
+  const canEdit = canEditFromRole(space?.memberRole ?? null) || isAdmin;
+
+  const transcriptLines = Array.from(lines.values()).map(toTranscriptLine);
 
   return (
     <>
@@ -148,7 +178,7 @@ function SessionDetail() {
         <div className="scribe-row">
           <span>Started {new Date(session.startedAt).toLocaleString()}</span>
           {!finalized ? (
-            <button onClick={finalize} disabled={busy}>Finalize</button>
+            canEdit && <button onClick={finalize} disabled={busy}>Finalize</button>
           ) : (
             <>
               <span>
@@ -164,11 +194,12 @@ function SessionDetail() {
 
       {recorderBusy && (
         <div className="scribe-error">
-          Another client is recording this session. <button className="secondary" onClick={() => window.location.reload()}>Refresh</button>
+          Another client is recording this session.{" "}
+          <button className="secondary" onClick={() => window.location.reload()}>Refresh</button>
         </div>
       )}
 
-      {!finalized && !recorderBusy && (
+      {!finalized && !recorderBusy && canEdit && (
         <div className="scribe-row" style={{ margin: "0.6rem 0" }}>
           {recorder.state === "idle" && <button onClick={() => void recorder.start()}>Record</button>}
           {recorder.state === "requesting_mic" && <button disabled>Requesting mic</button>}
@@ -193,42 +224,16 @@ function SessionDetail() {
         </div>
       )}
 
-      <div className="scribe-transcript">
-        {sortedLines.length === 0 && partial === null ? (
-          <p className="scribe-empty">No lines yet.</p>
-        ) : (
-          <>
-            {sortedLines.map((line) => (
-              <div className="scribe-line" key={line.id}>
-                <div className="scribe-line__ts">{formatMs(line.start_ms)}</div>
-                <div className="scribe-line__speaker">{line.resolved_speaker}</div>
-                <div>{line.text}</div>
-              </div>
-            ))}
-            {partial && (
-              <div className="scribe-line" style={{ opacity: 0.6 }}>
-                <div className="scribe-line__ts"></div>
-                <div className="scribe-line__speaker">...</div>
-                <div>{partial}</div>
-              </div>
-            )}
-          </>
-        )}
-      </div>
+      <TranscriptView
+        spaceSlug={slug}
+        sessionId={sessionId}
+        lines={transcriptLines}
+        partial={partial}
+        finalized={finalized}
+        canEdit={canEdit}
+      />
     </>
   );
-}
-
-function toLine(evt: LineEvent): Line {
-  return {
-    id: evt.id,
-    line_index: evt.line_index,
-    start_ms: evt.start_ms,
-    end_ms: evt.end_ms,
-    text: evt.text,
-    raw_speaker_label: evt.raw_speaker_label,
-    resolved_speaker: evt.resolved_speaker,
-  };
 }
 
 export const Route = createRoute({
