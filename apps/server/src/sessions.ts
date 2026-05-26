@@ -7,6 +7,7 @@ import {
   loadSpaceBySlug,
   meetsRole,
 } from "./space-acl";
+import { loadResolvedLinesForSession } from "./lines";
 
 export type SessionState = "recording" | "paused" | "stopped" | "finalized";
 
@@ -183,7 +184,22 @@ sessions.get("/sessions/:id", async (c) => {
   if (!meetsRole(role, "viewer") && space.visibility !== "public") {
     return c.json({ error: "forbidden" }, 403);
   }
-  return c.json(toSession(session));
+  const lines = await loadResolvedLinesForSession(session.id);
+  return c.json({
+    ...toSession(session),
+    lines: lines.map((l) => ({
+      id: l.id,
+      session_id: l.sessionId,
+      capture_id: l.captureId,
+      line_index: l.lineIndex,
+      start_ms: l.startMs,
+      end_ms: l.endMs,
+      text: l.text,
+      raw_speaker_label: l.rawSpeakerLabel,
+      resolved_speaker: l.resolvedSpeaker,
+      created_at: l.createdAt,
+    })),
+  });
 });
 
 sessions.patch("/sessions/:id", async (c) => {

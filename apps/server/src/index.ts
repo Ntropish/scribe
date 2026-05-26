@@ -9,6 +9,7 @@ import authRoutes from "./auth";
 import mcpRoutes from "./mcp";
 import spacesRoutes from "./spaces";
 import sessionsRoutes from "./sessions";
+import speakersRoutes from "./speakers";
 import { attachSocketIO } from "./sockets";
 import { cleanupExpired } from "./db";
 
@@ -25,6 +26,7 @@ app.route("/", authRoutes);
 app.route("/mcp", mcpRoutes);
 app.route("/api/spaces", spacesRoutes);
 app.route("/api", sessionsRoutes);
+app.route("/api", speakersRoutes);
 
 const webDist = join(import.meta.dirname, "..", "..", "web", "dist");
 app.use("/assets/*", serveStatic({ root: webDist }));
