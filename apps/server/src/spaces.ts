@@ -134,7 +134,7 @@ spaces.post("/", async (c) => {
       memberRole: "owner" as const,
     }, 201);
   } catch (err) {
-    if (err && typeof err === "object" && "code" in err && err.code === "23505") {
+    if (isUniqueViolation(err)) {
       return c.json({ error: "slug already exists" }, 409);
     }
     throw err;
@@ -164,6 +164,51 @@ spaces.get("/:slug", async (c) => {
   });
 });
 
+function isUniqueViolation(err: unknown): boolean {
+  if (!err || typeof err !== "object" || !("code" in err)) return false;
+  return (err as { code?: string }).code === "23505";
+}
+
+function normalisePatch(patch: {
+  name?: string | undefined;
+  description?: string | undefined;
+  visibility?: "private" | "public" | undefined;
+}): { name: string | null; description: string | null; visibility: "private" | "public" | null } {
+  return {
+    name: patch.name ?? null,
+    description: patch.description ?? null,
+    visibility: patch.visibility ?? null,
+  };
+}
+
+async function applySpacePatch(
+  spaceId: string,
+  patch: { name: string | null; description: string | null; visibility: "private" | "public" | null },
+  updatedBy: string,
+) {
+  const sql = getPostgresClient();
+  return sql<{
+    id: string;
+    slug: string;
+    name: string;
+    description: string;
+    visibility: "private" | "public";
+    created_by_sub: string;
+    created_at: string;
+    updated_at: string;
+  }[]>`
+    UPDATE spaces SET
+      name = COALESCE(${patch.name}, name),
+      description = COALESCE(${patch.description}, description),
+      visibility = COALESCE(${patch.visibility}, visibility),
+      updated_by_sub = ${updatedBy},
+      updated_at = now()
+    WHERE id = ${spaceId}
+    RETURNING id, slug, name, description, visibility,
+              created_by_sub, created_at, updated_at
+  `;
+}
+
 spaces.patch("/:slug", async (c) => {
   const auth = getAuth(c);
   const space = await loadSpaceBySlug(c.req.param("slug"));
@@ -177,32 +222,11 @@ spaces.patch("/:slug", async (c) => {
   if (!parsed.success) {
     return c.json({ error: "invalid body", issues: parsed.error.issues }, 400);
   }
-  const { name, description, visibility } = parsed.data;
-  if (name === undefined && description === undefined && visibility === undefined) {
+  if (Object.values(parsed.data).every((v) => v === undefined)) {
     return c.json({ error: "no fields to update" }, 400);
   }
 
-  const sql = getPostgresClient();
-  const rows = await sql<{
-    id: string;
-    slug: string;
-    name: string;
-    description: string;
-    visibility: "private" | "public";
-    created_by_sub: string;
-    created_at: string;
-    updated_at: string;
-  }[]>`
-    UPDATE spaces SET
-      name = COALESCE(${name ?? null}, name),
-      description = COALESCE(${description ?? null}, description),
-      visibility = COALESCE(${visibility ?? null}, visibility),
-      updated_by_sub = ${auth.subject},
-      updated_at = now()
-    WHERE id = ${space.id}
-    RETURNING id, slug, name, description, visibility,
-              created_by_sub, created_at, updated_at
-  `;
+  const rows = await applySpacePatch(space.id, normalisePatch(parsed.data), auth.subject);
   const row = rows[0];
   if (!row) return c.json({ error: "not found" }, 404);
   return c.json({

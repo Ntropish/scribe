@@ -53,61 +53,78 @@ interface UseRecorderOptions {
   onState: (state: StateEvent) => void;
 }
 
-export function useRecorder({
-  sessionId,
-  onLine,
-  onLineUpdated,
-  onPartial,
-  onState,
-}: UseRecorderOptions): RecorderApi {
+interface AudioPipeline {
+  audioCtx: AudioContext;
+  worklet: AudioWorkletNode;
+  stream: MediaStream;
+}
+
+async function buildAudioPipeline(onChunk: (buf: ArrayBuffer) => void): Promise<AudioPipeline> {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const audioCtx = new AudioContext();
+  await audioCtx.audioWorklet.addModule("/scribe-audio-worklet.js");
+  const source = audioCtx.createMediaStreamSource(stream);
+  const worklet = new AudioWorkletNode(audioCtx, "scribe-audio-worklet");
+  worklet.port.onmessage = (ev) => {
+    if (ev.data instanceof ArrayBuffer) onChunk(ev.data);
+  };
+  source.connect(worklet);
+  return { audioCtx, worklet, stream };
+}
+
+function teardownPipeline(pipeline: AudioPipeline | null) {
+  if (!pipeline) return;
+  pipeline.worklet.disconnect();
+  void pipeline.audioCtx.close();
+  for (const track of pipeline.stream.getTracks()) track.stop();
+}
+
+function wireSocket(socket: Socket, sessionId: string, opts: UseRecorderOptions, setError: (m: string) => void) {
+  socket.on("connect", () => socket.emit("join", { session_id: sessionId }));
+  socket.on("line", (evt: LineEvent) => opts.onLine(evt));
+  socket.on("line_updated", (evt: LineEvent) => opts.onLineUpdated(evt));
+  socket.on("partial", (evt: PartialEvent) => opts.onPartial(evt));
+  socket.on("state", (evt: StateEvent) => opts.onState(evt));
+  socket.on("error", (evt: { code: string; message: string }) => {
+    setError(`${evt.code}: ${evt.message}`);
+  });
+}
+
+function emitStartAck(socket: Socket, sessionId: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    socket.emit("start", { session_id: sessionId }, (resp: { ok: boolean; error?: string }) => {
+      if (resp?.ok) resolve();
+      else reject(new Error(resp?.error || "start failed"));
+    });
+  });
+}
+
+export function useRecorder(opts: UseRecorderOptions): RecorderApi {
+  const { sessionId } = opts;
   const [state, setState] = useState<RecorderState>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [recorderSocketId, setRecorderSocketId] = useState<string | null>(null);
   const socketRef = useRef<Socket | null>(null);
-  const audioCtxRef = useRef<AudioContext | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const workletRef = useRef<AudioWorkletNode | null>(null);
+  const pipelineRef = useRef<AudioPipeline | null>(null);
 
-  // The recorder hook owns its socket so the connection's lifetime matches
-  // the session view. Other listeners on the same page can opt into the
-  // same socket via the returned helpers if needed.
   useEffect(() => {
-    const socket = io({
-      withCredentials: true,
-      autoConnect: true,
-    });
+    const socket = io({ withCredentials: true, autoConnect: true });
     socketRef.current = socket;
-
-    socket.on("connect", () => {
-      socket.emit("join", { session_id: sessionId });
+    wireSocket(socket, sessionId, opts, (msg) => {
+      setErrorMessage(msg);
+      if (msg.startsWith("recorder_busy:")) setState("error");
     });
-    socket.on("line", (evt: LineEvent) => onLine(evt));
-    socket.on("line_updated", (evt: LineEvent) => onLineUpdated(evt));
-    socket.on("partial", (evt: PartialEvent) => onPartial(evt));
-    socket.on("state", (evt: StateEvent) => {
-      setRecorderSocketId(evt.recorder_socket_id);
-      onState(evt);
-    });
-    socket.on("error", (evt: { code: string; message: string }) => {
-      setErrorMessage(`${evt.code}: ${evt.message}`);
-      if (evt.code === "recorder_busy") {
-        setState("error");
-      }
-    });
-
+    socket.on("state", (evt: StateEvent) => setRecorderSocketId(evt.recorder_socket_id));
     return () => {
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [sessionId, onLine, onLineUpdated, onPartial, onState]);
+  }, [sessionId, opts]);
 
-  // beforeunload safety: release the lock if the recorder tab closes.
   useEffect(() => {
     function handle() {
       const socket = socketRef.current;
-      if (socket && socket.connected) {
-        socket.emit("stop");
-      }
+      if (socket?.connected) socket.emit("stop");
     }
     window.addEventListener("beforeunload", handle);
     return () => window.removeEventListener("beforeunload", handle);
@@ -119,90 +136,39 @@ export function useRecorder({
     setErrorMessage(null);
     setState("requesting_mic");
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-
-      const audioCtx = new AudioContext();
-      await audioCtx.audioWorklet.addModule("/scribe-audio-worklet.js");
-      audioCtxRef.current = audioCtx;
-
-      const source = audioCtx.createMediaStreamSource(stream);
-      const worklet = new AudioWorkletNode(audioCtx, "scribe-audio-worklet");
-      workletRef.current = worklet;
-
-      worklet.port.onmessage = (ev) => {
-        if (!(ev.data instanceof ArrayBuffer)) return;
-        if (socket.connected) socket.emit("audio", ev.data);
-      };
-
-      source.connect(worklet);
-
-      await new Promise<void>((resolve, reject) => {
-        socket.emit("start", { session_id: sessionId }, (resp: { ok: boolean; error?: string }) => {
-          if (resp?.ok) resolve();
-          else reject(new Error(resp?.error || "start failed"));
-        });
+      pipelineRef.current = await buildAudioPipeline((buf) => {
+        if (socket.connected) socket.emit("audio", buf);
       });
-
+      await emitStartAck(socket, sessionId);
       setState("recording");
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setErrorMessage(msg);
+      setErrorMessage(err instanceof Error ? err.message : String(err));
       setState("error");
-      teardownLocal();
+      teardownPipeline(pipelineRef.current);
+      pipelineRef.current = null;
     }
   }, [sessionId]);
 
   const pause = useCallback(() => {
-    const socket = socketRef.current;
-    if (!socket) return;
-    socket.emit("pause");
+    socketRef.current?.emit("pause");
     setState("paused");
   }, []);
 
   const resume = useCallback(() => {
-    const socket = socketRef.current;
-    if (!socket) return;
-    socket.emit("resume");
+    socketRef.current?.emit("resume");
     setState("recording");
   }, []);
 
-  function teardownLocal() {
-    if (workletRef.current) {
-      workletRef.current.disconnect();
-      workletRef.current = null;
-    }
-    if (audioCtxRef.current) {
-      void audioCtxRef.current.close();
-      audioCtxRef.current = null;
-    }
-    if (streamRef.current) {
-      for (const track of streamRef.current.getTracks()) track.stop();
-      streamRef.current = null;
-    }
-  }
-
   const stop = useCallback(async () => {
-    const socket = socketRef.current;
     setState("stopping");
-    if (socket) {
-      socket.emit("stop");
-    }
-    teardownLocal();
+    socketRef.current?.emit("stop");
+    teardownPipeline(pipelineRef.current);
+    pipelineRef.current = null;
     setState("idle");
   }, []);
 
   const iAmRecorder =
     !!socketRef.current?.id && recorderSocketId === socketRef.current.id;
 
-  return {
-    state,
-    errorMessage,
-    recorderSocketId,
-    iAmRecorder,
-    start,
-    pause,
-    resume,
-    stop,
-  };
+  return { state, errorMessage, recorderSocketId, iAmRecorder, start, pause, resume, stop };
 }

@@ -80,8 +80,6 @@ interface CaptureState {
   nextLineIndex: number;
 }
 
-// Per-session in-process state. Only one capture (== one service WS) at a
-// time; a second client trying to start hits recorder_busy.
 const activeCaptures = new Map<string, CaptureState>();
 
 let ioInstance: IO | null = null;
@@ -101,15 +99,12 @@ function readCookie(header: string | undefined, name: string): string | null {
   for (const part of header.split(";")) {
     const eq = part.indexOf("=");
     if (eq === -1) continue;
-    const k = part.slice(0, eq).trim();
-    if (k === name) return part.slice(eq + 1).trim();
+    if (part.slice(0, eq).trim() === name) return part.slice(eq + 1).trim();
   }
   return null;
 }
 
-async function resolveAuthFromSocket(
-  socket: ServerSocket,
-): Promise<AuthContext | null> {
+async function resolveAuthFromSocket(socket: ServerSocket): Promise<AuthContext | null> {
   if (env.authDisabled) {
     return {
       type: "user",
@@ -140,8 +135,7 @@ async function resolveAuthFromSocket(
 async function loadSession(id: string): Promise<SessionDbRow | null> {
   const sql = getPostgresClient();
   const rows = await sql<SessionDbRow[]>`
-    SELECT id, space_id, state
-    FROM sessions WHERE id = ${id}
+    SELECT id, space_id, state FROM sessions WHERE id = ${id}
   `;
   return rows[0] ?? null;
 }
@@ -156,35 +150,29 @@ async function loadSpaceForSession(
   return { session, space };
 }
 
-async function emitError(
-  socket: ServerSocket,
-  code: string,
-  message: string,
-): Promise<void> {
+function emitErr(socket: ServerSocket, code: string, message: string, ack?: AckFn) {
   socket.emit("error", { code, message });
+  ack?.({ ok: false, error: code });
 }
 
-function emitState(io: IO, sessionId: string, partial: {
-  state: SessionDbRow["state"];
-  recorderSocketId: string | null;
-  isAudioFlowing: boolean;
-}): void {
+function emitState(
+  io: IO,
+  sessionId: string,
+  state: SessionDbRow["state"],
+  recorderSocketId: string | null,
+  isAudioFlowing: boolean,
+) {
   io.to(`session:${sessionId}`).emit("state", {
     session_id: sessionId,
-    state: partial.state,
-    is_audio_flowing: partial.isAudioFlowing,
-    recorder_socket_id: partial.recorderSocketId,
+    state,
+    is_audio_flowing: isAudioFlowing,
+    recorder_socket_id: recorderSocketId,
   });
 }
 
-async function setSessionState(
-  sessionId: string,
-  state: SessionDbRow["state"],
-): Promise<void> {
+async function setSessionState(sessionId: string, state: SessionDbRow["state"]): Promise<void> {
   const sql = getPostgresClient();
-  await sql`
-    UPDATE sessions SET state = ${state}, updated_at = now() WHERE id = ${sessionId}
-  `;
+  await sql`UPDATE sessions SET state = ${state}, updated_at = now() WHERE id = ${sessionId}`;
 }
 
 async function createCaptureRow(sessionId: string): Promise<{ id: string; startedAtMs: number }> {
@@ -216,7 +204,6 @@ interface FinalFrame {
   type: "final";
   text: string;
   audio_s: number;
-  latency_ms?: number;
   speaker?: string;
   embedding?: number[];
 }
@@ -224,11 +211,9 @@ interface FinalFrame {
 interface PartialFrame {
   type: "partial";
   text: string;
-  audio_s?: number;
-  latency_ms?: number;
 }
 
-type ServiceFrame = FinalFrame | PartialFrame | { type: string; [key: string]: unknown };
+type ServiceFrame = FinalFrame | PartialFrame | { type: string };
 
 async function insertLine(
   capture: CaptureState,
@@ -243,8 +228,6 @@ async function insertLine(
   created_at: string;
 }> {
   const sql = getPostgresClient();
-  // The service's `audio_s` is utterance length, so we approximate the
-  // utterance window from the capture's wall-clock anchor.
   const endMs = Date.now() - capture.captureStartedAt;
   const startMs = Math.max(0, endMs - Math.round(frame.audio_s * 1000));
   const lineIndex = capture.nextLineIndex;
@@ -282,9 +265,7 @@ function teardownCapture(state: CaptureState, reason: "stop" | "service_error"):
     // ignore
   }
   const sql = getPostgresClient();
-  void sql`
-    UPDATE captures SET ended_at = now() WHERE id = ${state.captureId}
-  `.catch(() => {});
+  void sql`UPDATE captures SET ended_at = now() WHERE id = ${state.captureId}`.catch(() => {});
   activeCaptures.delete(state.sessionId);
   if (reason === "service_error") {
     state.io.to(`session:${state.sessionId}`).emit("error", {
@@ -294,9 +275,31 @@ function teardownCapture(state: CaptureState, reason: "stop" | "service_error"):
   }
 }
 
+async function handleFinalFrame(state: CaptureState, frame: FinalFrame) {
+  try {
+    const row = await insertLine(state, frame);
+    const resolved = await loadResolvedLineById(row.id);
+    const resolvedSpeaker = resolved?.resolvedSpeaker ?? row.raw_speaker_label;
+    state.io.to(`session:${state.sessionId}`).emit("line", {
+      id: row.id,
+      session_id: state.sessionId,
+      capture_id: state.captureId,
+      line_index: row.line_index,
+      start_ms: row.start_ms,
+      end_ms: row.end_ms,
+      text: row.text,
+      raw_speaker_label: row.raw_speaker_label,
+      resolved_speaker: resolvedSpeaker,
+      created_at: row.created_at,
+    });
+  } catch (err) {
+    console.error("[scribe] failed to write line:", err);
+  }
+}
+
 function attachServiceListeners(state: CaptureState): void {
-  state.serviceWs.on("message", async (raw, isBinary) => {
-    if (isBinary) return; // service never sends binary back
+  state.serviceWs.on("message", (raw, isBinary) => {
+    if (isBinary) return;
     let frame: ServiceFrame;
     try {
       frame = JSON.parse(raw.toString()) as ServiceFrame;
@@ -308,48 +311,182 @@ function attachServiceListeners(state: CaptureState): void {
         text: (frame as PartialFrame).text,
         capture_id: state.captureId,
       });
-      return;
+    } else if (frame.type === "final") {
+      void handleFinalFrame(state, frame as FinalFrame);
     }
-    if (frame.type === "final") {
-      try {
-        const row = await insertLine(state, frame as FinalFrame);
-        const resolved = await loadResolvedLineById(row.id);
-        const resolvedSpeaker = resolved?.resolvedSpeaker ?? row.raw_speaker_label;
-        state.io.to(`session:${state.sessionId}`).emit("line", {
-          id: row.id,
-          session_id: state.sessionId,
-          capture_id: state.captureId,
-          line_index: row.line_index,
-          start_ms: row.start_ms,
-          end_ms: row.end_ms,
-          text: row.text,
-          raw_speaker_label: row.raw_speaker_label,
-          resolved_speaker: resolvedSpeaker,
-          created_at: row.created_at,
-        });
-      } catch (err) {
-        console.error("[scribe] failed to write line:", err);
-      }
-      return;
-    }
-    // ready / unknown: ignore
   });
 
   state.serviceWs.on("close", () => {
-    if (activeCaptures.get(state.sessionId) === state) {
-      teardownCapture(state, "service_error");
-      void setSessionState(state.sessionId, "stopped").catch(() => {});
-      emitState(state.io, state.sessionId, {
-        state: "stopped",
-        recorderSocketId: null,
-        isAudioFlowing: false,
-      });
-    }
+    if (activeCaptures.get(state.sessionId) !== state) return;
+    teardownCapture(state, "service_error");
+    void setSessionState(state.sessionId, "stopped").catch(() => {});
+    emitState(state.io, state.sessionId, "stopped", null, false);
   });
 
   state.serviceWs.on("error", (err) => {
     console.error("[scribe] whisper-stream socket error:", err);
   });
+}
+
+async function handleJoin(io: IO, socket: ServerSocket, payload: unknown, ack: AckFn | undefined) {
+  const parsed = joinSchema.safeParse(payload);
+  if (!parsed.success) {
+    return emitErr(socket, "invalid_payload", "join payload must be { session_id }", ack);
+  }
+  const ctx = await loadSpaceForSession(parsed.data.session_id);
+  if (!ctx) return emitErr(socket, "not_found", "session not found", ack);
+  const role = await effectiveSpaceRole(ctx.space, socket.data.auth);
+  if (!meetsRole(role, "viewer") && ctx.space.visibility !== "public") {
+    return emitErr(socket, "not_authorized", "no access to this space", ack);
+  }
+  socket.data.sessionId = ctx.session.id;
+  await socket.join(`session:${ctx.session.id}`);
+  const capture = activeCaptures.get(ctx.session.id);
+  emitState(
+    io,
+    ctx.session.id,
+    ctx.session.state,
+    capture?.recorderSocketId ?? null,
+    capture?.forwardingAudio ?? false,
+  );
+  ack?.({ ok: true });
+}
+
+interface StartContext {
+  session: SessionDbRow;
+  space: SpaceCore;
+  language: string | undefined;
+}
+
+async function guardStart(
+  socket: ServerSocket,
+  payload: unknown,
+  ack: AckFn | undefined,
+): Promise<StartContext | null> {
+  const parsed = startSchema.safeParse(payload);
+  if (!parsed.success) {
+    emitErr(socket, "invalid_payload", "start payload must include session_id", ack);
+    return null;
+  }
+  const ctx = await loadSpaceForSession(parsed.data.session_id);
+  if (!ctx) {
+    emitErr(socket, "not_found", "session not found", ack);
+    return null;
+  }
+  if (ctx.session.state === "finalized") {
+    emitErr(socket, "session_finalized", "session is finalized", ack);
+    return null;
+  }
+  const role = await effectiveSpaceRole(ctx.space, socket.data.auth);
+  if (!meetsRole(role, "editor")) {
+    emitErr(socket, "not_authorized", "editor role required to record", ack);
+    return null;
+  }
+  if (activeCaptures.has(ctx.session.id)) {
+    emitErr(socket, "recorder_busy", "another client is recording this session", ack);
+    return null;
+  }
+  return { session: ctx.session, space: ctx.space, language: parsed.data.language };
+}
+
+function openServiceWs(url: string): Promise<WebSocket> {
+  return new Promise<WebSocket>((resolve, reject) => {
+    const ws = new WebSocket(url);
+    ws.once("open", () => resolve(ws));
+    ws.once("error", (err) => reject(err));
+  });
+}
+
+async function handleStart(io: IO, socket: ServerSocket, payload: unknown, ack: AckFn | undefined) {
+  const ctx = await guardStart(socket, payload, ack);
+  if (!ctx) return;
+  let ws: WebSocket;
+  try {
+    ws = await openServiceWs(env.whisperStreamUrl);
+  } catch (err) {
+    console.error("[scribe] could not open whisper-stream WS:", err);
+    return emitErr(socket, "service_unavailable", "whisper-stream is unreachable", ack);
+  }
+  ws.send(JSON.stringify({
+    type: "start",
+    ...(ctx.language ? { language: ctx.language } : {}),
+    space_id: ctx.session.space_id,
+  }));
+  const capture = await createCaptureRow(ctx.session.id);
+  const nextIdx = await nextLineIndex(ctx.session.id);
+  const state: CaptureState = {
+    io,
+    sessionId: ctx.session.id,
+    spaceId: ctx.session.space_id,
+    spaceSlug: ctx.space.slug,
+    recorderSocketId: socket.id,
+    serviceWs: ws,
+    captureId: capture.id,
+    captureStartedAt: capture.startedAtMs,
+    forwardingAudio: true,
+    nextLineIndex: nextIdx,
+  };
+  activeCaptures.set(ctx.session.id, state);
+  attachServiceListeners(state);
+  socket.data.sessionId = ctx.session.id;
+  await socket.join(`session:${ctx.session.id}`);
+  await setSessionState(ctx.session.id, "recording");
+  emitState(io, ctx.session.id, "recording", socket.id, true);
+  ack?.({ ok: true, capture_id: capture.id });
+}
+
+function handleAudio(socket: ServerSocket, buf: Buffer | ArrayBuffer) {
+  const sessionId = socket.data.sessionId;
+  if (!sessionId) return;
+  const state = activeCaptures.get(sessionId);
+  if (!state || state.recorderSocketId !== socket.id) return;
+  if (!state.forwardingAudio) return;
+  if (state.serviceWs.readyState !== WebSocket.OPEN) return;
+  state.serviceWs.send(buf);
+}
+
+async function handlePauseResume(
+  io: IO,
+  socket: ServerSocket,
+  ack: AckFn | undefined,
+  next: "recording" | "paused",
+) {
+  const sessionId = socket.data.sessionId;
+  if (!sessionId) return ack?.({ ok: false });
+  const state = activeCaptures.get(sessionId);
+  if (!state || state.recorderSocketId !== socket.id) return ack?.({ ok: false });
+  state.forwardingAudio = next === "recording";
+  await setSessionState(sessionId, next);
+  emitState(io, sessionId, next, state.recorderSocketId, state.forwardingAudio);
+  ack?.({ ok: true });
+}
+
+async function handleStopOrDisconnect(io: IO, socket: ServerSocket) {
+  const sessionId = socket.data.sessionId;
+  if (!sessionId) return;
+  const state = activeCaptures.get(sessionId);
+  if (!state || state.recorderSocketId !== socket.id) return;
+  try {
+    state.serviceWs.send(JSON.stringify({ type: "stop" }));
+  } catch {
+    // ignore
+  }
+  teardownCapture(state, "stop");
+  await setSessionState(sessionId, "stopped");
+  emitState(io, sessionId, "stopped", null, false);
+}
+
+function bindSocketHandlers(io: IO, socket: ServerSocket) {
+  socket.on("join", (payload, ack) => void handleJoin(io, socket, payload, ack));
+  socket.on("start", (payload, ack) => void handleStart(io, socket, payload, ack));
+  socket.on("audio", (buf) => handleAudio(socket, buf));
+  socket.on("pause", (_p, ack) => void handlePauseResume(io, socket, ack, "paused"));
+  socket.on("resume", (_p, ack) => void handlePauseResume(io, socket, ack, "recording"));
+  socket.on("stop", (_p, ack) => {
+    void handleStopOrDisconnect(io, socket);
+    ack?.({ ok: true });
+  });
+  socket.on("disconnect", () => void handleStopOrDisconnect(io, socket));
 }
 
 export function attachSocketIO(httpServer: HttpServer): IO {
@@ -369,201 +506,6 @@ export function attachSocketIO(httpServer: HttpServer): IO {
     next();
   });
 
-  io.on("connection", (socket) => {
-    socket.on("join", async (payload, ack?: (resp: unknown) => void) => {
-      const parsed = joinSchema.safeParse(payload);
-      if (!parsed.success) {
-        await emitError(socket, "invalid_payload", "join payload must be { session_id }");
-        ack?.({ ok: false });
-        return;
-      }
-      const ctx = await loadSpaceForSession(parsed.data.session_id);
-      if (!ctx) {
-        await emitError(socket, "not_found", "session not found");
-        ack?.({ ok: false });
-        return;
-      }
-      const role = await effectiveSpaceRole(ctx.space, socket.data.auth);
-      if (!meetsRole(role, "viewer") && ctx.space.visibility !== "public") {
-        await emitError(socket, "not_authorized", "no access to this space");
-        ack?.({ ok: false });
-        return;
-      }
-      socket.data.sessionId = ctx.session.id;
-      await socket.join(`session:${ctx.session.id}`);
-      const capture = activeCaptures.get(ctx.session.id);
-      emitState(io, ctx.session.id, {
-        state: ctx.session.state,
-        recorderSocketId: capture?.recorderSocketId ?? null,
-        isAudioFlowing: capture?.forwardingAudio ?? false,
-      });
-      ack?.({ ok: true });
-    });
-
-    socket.on("start", async (payload, ack?: (resp: unknown) => void) => {
-      const parsed = startSchema.safeParse(payload);
-      if (!parsed.success) {
-        await emitError(socket, "invalid_payload", "start payload must include session_id");
-        ack?.({ ok: false });
-        return;
-      }
-      const ctx = await loadSpaceForSession(parsed.data.session_id);
-      if (!ctx) {
-        await emitError(socket, "not_found", "session not found");
-        ack?.({ ok: false });
-        return;
-      }
-      if (ctx.session.state === "finalized") {
-        await emitError(socket, "session_finalized", "session is finalized");
-        ack?.({ ok: false });
-        return;
-      }
-      const role = await effectiveSpaceRole(ctx.space, socket.data.auth);
-      if (!meetsRole(role, "editor")) {
-        await emitError(socket, "not_authorized", "editor role required to record");
-        ack?.({ ok: false });
-        return;
-      }
-      if (activeCaptures.has(ctx.session.id)) {
-        await emitError(socket, "recorder_busy", "another client is recording this session");
-        ack?.({ ok: false });
-        return;
-      }
-
-      // Open the service WS first; only commit captures row if it opens cleanly.
-      const ws = new WebSocket(env.whisperStreamUrl);
-      try {
-        await new Promise<void>((resolve, reject) => {
-          ws.once("open", () => resolve());
-          ws.once("error", (err) => reject(err));
-        });
-      } catch (err) {
-        console.error("[scribe] could not open whisper-stream WS:", err);
-        await emitError(socket, "service_unavailable", "whisper-stream is unreachable");
-        ack?.({ ok: false });
-        return;
-      }
-
-      const startMsg = {
-        type: "start" as const,
-        ...(parsed.data.language ? { language: parsed.data.language } : {}),
-        space_id: ctx.session.space_id,
-      };
-      ws.send(JSON.stringify(startMsg));
-
-      const capture = await createCaptureRow(ctx.session.id);
-      const nextIdx = await nextLineIndex(ctx.session.id);
-
-      const state: CaptureState = {
-        io,
-        sessionId: ctx.session.id,
-        spaceId: ctx.session.space_id,
-        spaceSlug: ctx.space.slug,
-        recorderSocketId: socket.id,
-        serviceWs: ws,
-        captureId: capture.id,
-        captureStartedAt: capture.startedAtMs,
-        forwardingAudio: true,
-        nextLineIndex: nextIdx,
-      };
-      activeCaptures.set(ctx.session.id, state);
-      attachServiceListeners(state);
-
-      socket.data.sessionId = ctx.session.id;
-      await socket.join(`session:${ctx.session.id}`);
-
-      await setSessionState(ctx.session.id, "recording");
-      emitState(io, ctx.session.id, {
-        state: "recording",
-        recorderSocketId: socket.id,
-        isAudioFlowing: true,
-      });
-      ack?.({ ok: true, capture_id: capture.id });
-    });
-
-    socket.on("audio", (buf: ArrayBuffer | Buffer) => {
-      const sessionId = socket.data.sessionId;
-      if (!sessionId) return;
-      const state = activeCaptures.get(sessionId);
-      if (!state || state.recorderSocketId !== socket.id) return;
-      if (!state.forwardingAudio) return;
-      if (state.serviceWs.readyState !== WebSocket.OPEN) return;
-      state.serviceWs.send(buf as Buffer | ArrayBuffer);
-    });
-
-    socket.on("pause", async (_payload, ack?: (resp: unknown) => void) => {
-      const sessionId = socket.data.sessionId;
-      if (!sessionId) {
-        ack?.({ ok: false });
-        return;
-      }
-      const state = activeCaptures.get(sessionId);
-      if (!state || state.recorderSocketId !== socket.id) {
-        ack?.({ ok: false });
-        return;
-      }
-      state.forwardingAudio = false;
-      await setSessionState(sessionId, "paused");
-      emitState(io, sessionId, {
-        state: "paused",
-        recorderSocketId: state.recorderSocketId,
-        isAudioFlowing: false,
-      });
-      ack?.({ ok: true });
-    });
-
-    socket.on("resume", async (_payload, ack?: (resp: unknown) => void) => {
-      const sessionId = socket.data.sessionId;
-      if (!sessionId) {
-        ack?.({ ok: false });
-        return;
-      }
-      const state = activeCaptures.get(sessionId);
-      if (!state || state.recorderSocketId !== socket.id) {
-        ack?.({ ok: false });
-        return;
-      }
-      state.forwardingAudio = true;
-      await setSessionState(sessionId, "recording");
-      emitState(io, sessionId, {
-        state: "recording",
-        recorderSocketId: state.recorderSocketId,
-        isAudioFlowing: true,
-      });
-      ack?.({ ok: true });
-    });
-
-    async function stopRecording(reason: "stop" | "disconnect") {
-      const sessionId = socket.data.sessionId;
-      if (!sessionId) return;
-      const state = activeCaptures.get(sessionId);
-      if (!state || state.recorderSocketId !== socket.id) return;
-      try {
-        state.serviceWs.send(JSON.stringify({ type: "stop" }));
-      } catch {
-        // ignore
-      }
-      teardownCapture(state, "stop");
-      await setSessionState(sessionId, "stopped");
-      emitState(io, sessionId, {
-        state: "stopped",
-        recorderSocketId: null,
-        isAudioFlowing: false,
-      });
-      void reason;
-    }
-
-    socket.on("stop", async (_payload, ack?: (resp: unknown) => void) => {
-      await stopRecording("stop");
-      ack?.({ ok: true });
-    });
-
-    socket.on("disconnect", async () => {
-      await stopRecording("disconnect").catch((err) => {
-        console.error("[scribe] error during disconnect cleanup:", err);
-      });
-    });
-  });
-
+  io.on("connection", (socket) => bindSocketHandlers(io, socket));
   return io;
 }
