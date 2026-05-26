@@ -10,6 +10,7 @@ import mcpRoutes from "./mcp";
 import spacesRoutes from "./spaces";
 import sessionsRoutes from "./sessions";
 import speakersRoutes from "./speakers";
+import searchRoutes from "./search";
 import { attachSocketIO } from "./sockets";
 import { cleanupExpired } from "./db";
 
@@ -27,6 +28,7 @@ app.route("/mcp", mcpRoutes);
 app.route("/api/spaces", spacesRoutes);
 app.route("/api", sessionsRoutes);
 app.route("/api", speakersRoutes);
+app.route("/api/search", searchRoutes);
 
 const webDist = join(import.meta.dirname, "..", "..", "web", "dist");
 app.use("/assets/*", serveStatic({ root: webDist }));
