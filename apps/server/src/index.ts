@@ -1,7 +1,6 @@
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
-import { Server as SocketIOServer } from "socket.io";
 import { join } from "node:path";
 import { env } from "./env";
 import { runMigrations } from "./migrate";
@@ -10,6 +9,7 @@ import authRoutes from "./auth";
 import mcpRoutes from "./mcp";
 import spacesRoutes from "./spaces";
 import sessionsRoutes from "./sessions";
+import { attachSocketIO } from "./sockets";
 import { cleanupExpired } from "./db";
 
 if (env.databaseUrl) {
@@ -32,15 +32,7 @@ app.get("*", serveStatic({ root: webDist, path: "index.html" }));
 
 const server = serve({ fetch: app.fetch, port: env.port });
 
-const io = new SocketIOServer(server, {
-  cors: { origin: env.publicOrigin || true, credentials: true },
-});
-
-io.on("connection", (socket) => {
-  socket.on("disconnect", () => {
-    // Future beads will manage session rooms and the recorder lock here.
-  });
-});
+attachSocketIO(server as unknown as import("node:http").Server);
 
 setInterval(() => {
   void cleanupExpired();
