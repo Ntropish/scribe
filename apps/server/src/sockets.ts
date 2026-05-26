@@ -389,11 +389,28 @@ async function guardStart(
   return { session: ctx.session, space: ctx.space, language: parsed.data.language };
 }
 
+const SERVICE_WS_OPEN_TIMEOUT_MS = 5000;
+
 function openServiceWs(url: string): Promise<WebSocket> {
   return new Promise<WebSocket>((resolve, reject) => {
     const ws = new WebSocket(url);
-    ws.once("open", () => resolve(ws));
-    ws.once("error", (err) => reject(err));
+    const timer = setTimeout(() => {
+      ws.removeAllListeners();
+      try {
+        ws.terminate();
+      } catch {
+        // ignore
+      }
+      reject(new Error(`whisper-stream did not respond within ${SERVICE_WS_OPEN_TIMEOUT_MS}ms`));
+    }, SERVICE_WS_OPEN_TIMEOUT_MS);
+    ws.once("open", () => {
+      clearTimeout(timer);
+      resolve(ws);
+    });
+    ws.once("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
   });
 }
 
