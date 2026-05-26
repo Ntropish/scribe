@@ -9,6 +9,7 @@ import { wellKnown } from "./well-known";
 import authRoutes from "./auth";
 import mcpRoutes from "./mcp";
 import spacesRoutes from "./spaces";
+import sessionsRoutes from "./sessions";
 import { cleanupExpired } from "./db";
 
 if (env.databaseUrl) {
@@ -23,6 +24,7 @@ app.route("/.well-known", wellKnown);
 app.route("/", authRoutes);
 app.route("/mcp", mcpRoutes);
 app.route("/api/spaces", spacesRoutes);
+app.route("/api", sessionsRoutes);
 
 const webDist = join(import.meta.dirname, "..", "..", "web", "dist");
 app.use("/assets/*", serveStatic({ root: webDist }));
