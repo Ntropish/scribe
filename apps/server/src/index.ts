@@ -1,5 +1,5 @@
 import { serve } from "@hono/node-server";
-import { serveStatic } from "@hono/node-server/serve-static";
+import { serveStatic } from "hono/bun";
 import { Hono } from "hono";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
