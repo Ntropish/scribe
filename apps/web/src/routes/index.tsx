@@ -1,42 +1,23 @@
-import { createRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { createRoute, useNavigate } from "@tanstack/react-router";
+import { useEffect } from "react";
 import { Route as rootRoute } from "./__root";
+import { useAuth } from "../auth-hook";
 
-interface Me {
-  displayName: string;
-  username: string;
-  groups: string[];
-}
-
-function Home() {
-  const [me, setMe] = useState<Me | null | undefined>(undefined);
-
+function Index() {
+  const auth = useAuth();
+  const navigate = useNavigate();
   useEffect(() => {
-    fetch("/api/me", { credentials: "include" })
-      .then((r) => r.json())
-      .then((data: Me | null) => setMe(data))
-      .catch(() => setMe(null));
-  }, []);
-
-  if (me === undefined) return <main>loading</main>;
-  if (me === null) {
-    return (
-      <main>
-        <a href="/auth/login">Sign in</a>
-      </main>
-    );
-  }
-  return (
-    <main>
-      <p>signed in as {me.displayName}</p>
-      <p>groups: {me.groups.join(", ") || "none"}</p>
-      <a href="/auth/logout">Sign out</a>
-    </main>
-  );
+    if (auth.status === "signed-in") {
+      void navigate({ to: "/spaces" });
+    } else if (auth.status === "signed-out") {
+      window.location.assign("/auth/login");
+    }
+  }, [auth.status, navigate]);
+  return null;
 }
 
 export const Route = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
-  component: Home,
+  component: Index,
 });
