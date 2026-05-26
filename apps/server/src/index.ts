@@ -1,6 +1,7 @@
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { env, validateEnv } from "./env";
 import { runMigrations } from "./migrate";
@@ -33,8 +34,32 @@ app.route("/api", speakersRoutes);
 app.route("/api/search", searchRoutes);
 
 const webDist = join(import.meta.dirname, "..", "..", "web", "dist");
-app.use("/assets/*", serveStatic({ root: webDist }));
-app.get("*", serveStatic({ root: webDist, path: "index.html" }));
+if (existsSync(webDist)) {
+  // Try to serve a real file under apps/web/dist first; rewrite `/` to
+  // `/index.html`. Hono's serveStatic does not call next() on miss, so
+  // the SPA fallback runs separately below for unmatched routes.
+  app.use(
+    "*",
+    serveStatic({
+      root: webDist,
+      rewriteRequestPath: (p) => (p === "/" ? "/index.html" : p),
+    }),
+  );
+  app.get("*", async (c) => {
+    const path = c.req.path;
+    const isBackend =
+      path.startsWith("/api/") ||
+      path.startsWith("/auth/") ||
+      path.startsWith("/.well-known/") ||
+      path === "/mcp" ||
+      path.startsWith("/mcp/") ||
+      path === "/healthz";
+    if (isBackend) return c.notFound();
+    const indexPath = join(webDist, "index.html");
+    const html = await Bun.file(indexPath).text();
+    return c.html(html);
+  });
+}
 
 const server = serve({ fetch: app.fetch, port: env.port });
 

@@ -1,18 +1,15 @@
 import { createRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { Route as rootRoute } from "./__root";
-import { useAuth } from "../auth-hook";
+import { useAuth } from "../auth-context";
 
 function Index() {
-  const auth = useAuth();
+  const { user, isLoading } = useAuth();
   const navigate = useNavigate();
   useEffect(() => {
-    if (auth.status === "signed-in") {
-      void navigate({ to: "/spaces" });
-    } else if (auth.status === "signed-out") {
-      window.location.assign("/auth/login");
-    }
-  }, [auth.status, navigate]);
+    if (isLoading) return;
+    if (user) void navigate({ to: "/spaces" });
+  }, [user, isLoading, navigate]);
   return null;
 }
 
