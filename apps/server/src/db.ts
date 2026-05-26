@@ -69,7 +69,7 @@ export async function createSession(
   const id = randomBytes(32).toString("base64url");
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
   const rows = await sql<Session[]>`
-    INSERT INTO sessions (id, user_id, groups, managed_agents, access_token, refresh_token, picture, expires_at)
+    INSERT INTO auth_sessions (id, user_id, groups, managed_agents, access_token, refresh_token, picture, expires_at)
     VALUES (${id}, ${userId}, ${groups}, ${managedAgents}, ${accessToken}, ${refreshToken ?? null}, ${picture ?? null}, ${expiresAt})
     RETURNING id, user_id AS "userId", groups, managed_agents AS "managedAgents",
               access_token AS "accessToken", refresh_token AS "refreshToken",
@@ -86,7 +86,7 @@ export async function getSession(id: string): Promise<Session | null> {
     SELECT id, user_id AS "userId", groups, managed_agents AS "managedAgents",
            access_token AS "accessToken", refresh_token AS "refreshToken",
            picture, expires_at AS "expiresAt"
-    FROM sessions
+    FROM auth_sessions
     WHERE id = ${id} AND expires_at > now()
   `;
   return rows[0] ?? null;
@@ -94,7 +94,7 @@ export async function getSession(id: string): Promise<Session | null> {
 
 export async function deleteSession(id: string): Promise<void> {
   const sql = getPostgresClient();
-  await sql`DELETE FROM sessions WHERE id = ${id}`;
+  await sql`DELETE FROM auth_sessions WHERE id = ${id}`;
 }
 
 export async function createOidcLoginState(state: string, codeVerifier: string, redirect: string): Promise<void> {
@@ -118,6 +118,6 @@ export async function consumeOidcLoginState(state: string): Promise<OidcLoginSta
 
 export async function cleanupExpired(): Promise<void> {
   const sql = getPostgresClient();
-  await sql`DELETE FROM sessions WHERE expires_at <= now()`;
+  await sql`DELETE FROM auth_sessions WHERE expires_at <= now()`;
   await sql`DELETE FROM oidc_login_states WHERE expires_at <= now()`;
 }

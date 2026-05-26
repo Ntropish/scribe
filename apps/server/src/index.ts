@@ -8,6 +8,7 @@ import { runMigrations } from "./migrate";
 import { wellKnown } from "./well-known";
 import authRoutes from "./auth";
 import mcpRoutes from "./mcp";
+import spacesRoutes from "./spaces";
 import { cleanupExpired } from "./db";
 
 if (env.databaseUrl) {
@@ -21,8 +22,7 @@ app.get("/healthz", (c) => c.json({ ok: true }));
 app.route("/.well-known", wellKnown);
 app.route("/", authRoutes);
 app.route("/mcp", mcpRoutes);
-
-app.get("/api/spaces", (c) => c.json([]));
+app.route("/api/spaces", spacesRoutes);
 
 const webDist = join(import.meta.dirname, "..", "..", "web", "dist");
 app.use("/assets/*", serveStatic({ root: webDist }));
