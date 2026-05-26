@@ -1,0 +1,46 @@
+name: scribe
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: apps/server/Dockerfile
+      secrets:
+        - bunfig
+    image: scribe-app:latest
+    container_name: scribe-app
+    env_file: ../.env
+    restart: unless-stopped
+    networks:
+      - default
+      - shared
+    healthcheck:
+      test:
+        - CMD
+        - bun
+        - -e
+        - "fetch('http://localhost:3000/healthz').then(r=>{if(!r.ok)throw 1}).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: scribe-cloudflared
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    profiles:
+      - tunnel
+
+secrets:
+  bunfig:
+    file: ../.bunfig.toml
+
+networks:
+  default:
+  shared:
+    external: true

@@ -1,0 +1,68 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: false
+
+      - name: Configure .env
+        run: |
+          touch .env
+          upsert() {
+            local key="$1" value="$2"
+            if grep -q "^${key}=" .env; then
+              sed -i "s|^${key}=.*|${key}=${value}|" .env
+            else
+              echo "${key}=${value}" >> .env
+            fi
+          }
+
+          upsert NODE_ENV production
+          upsert PORT 3000
+          upsert DATABASE_URL "postgres://trivorn:${{ secrets.POSTGRES_PASSWORD }}@shared-postgres:5432/scribe"
+          upsert WHISPER_STREAM_URL "${{ vars.WHISPER_STREAM_URL }}"
+          upsert WHISPER_STREAM_HTTP "${{ vars.WHISPER_STREAM_HTTP }}"
+          upsert OIDC_ISSUER "${{ vars.AUTH_ISSUER }}"
+          upsert OIDC_CLIENT_ID "${{ vars.OIDC_CLIENT_ID }}"
+          upsert OIDC_CLIENT_SECRET "${{ secrets.OIDC_CLIENT_SECRET }}"
+          upsert PUBLIC_ORIGIN "${{ vars.PUBLIC_ORIGIN }}"
+          upsert CLOUDFLARE_TUNNEL_TOKEN "${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}"
+
+      - name: Get registry token
+        run: |
+          TOKEN=$(curl -sf -X POST "${{ vars.AUTH_ISSUER }}/token" \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            -d "grant_type=client_credentials&client_id=${{ secrets.CI_REGISTRY_CLIENT_ID }}&client_secret=${{ secrets.CI_REGISTRY_CLIENT_SECRET }}&scope=groups" \
+            | jq -r '.access_token')
+          printf '[install.scopes]\n"@trivorn" = { url = "https://repo.trivorn.org/", token = "%s" }\n' "$TOKEN" > .bunfig.toml
+
+      - name: Deploy
+        env:
+          COMPOSE_DOCKER_CLI_BUILD: 1
+          DOCKER_BUILDKIT: 1
+        run: |
+          docker compose -f docker/docker-compose.yml --env-file .env --project-directory . --profile tunnel build
+          docker compose -f docker/docker-compose.yml --env-file .env --project-directory . --profile tunnel up -d --remove-orphans --wait
+
+      - name: Post-deploy diagnostics
+        if: always()
+        run: |
+          set +e
+
+          echo "::group::compose ps"
+          docker compose -f docker/docker-compose.yml --env-file .env --project-directory . ps -a
+          echo "::endgroup::"
+
+          echo "::group::server logs"
+          docker compose -f docker/docker-compose.yml --env-file .env --project-directory . logs app 2>&1 | tail -100
+          echo "::endgroup::"
+
+          set -e

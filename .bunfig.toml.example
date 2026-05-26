@@ -1,0 +1,2 @@
+[install.scopes]
+"@trivorn" = { url = "https://repo.trivorn.org/", token = "PASTE_TOKEN_HERE" }
