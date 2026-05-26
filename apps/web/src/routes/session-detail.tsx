@@ -117,6 +117,9 @@ function RecorderControls({ recorder }: { recorder: RecorderApi }) {
   if (recorder.state === "requesting_mic") {
     return <button disabled>Requesting mic</button>;
   }
+  if (recorder.state === "connecting") {
+    return <button disabled>Connecting to transcription service...</button>;
+  }
   if (recorder.state === "recording") {
     return (
       <>

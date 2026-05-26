@@ -4,10 +4,13 @@ import { io, Socket } from "socket.io-client";
 export type RecorderState =
   | "idle"
   | "requesting_mic"
+  | "connecting"
   | "recording"
   | "paused"
   | "stopping"
   | "error";
+
+const START_ACK_TIMEOUT_MS = 15000;
 
 export interface LineEvent {
   id: string;
@@ -92,7 +95,16 @@ function wireSocket(socket: Socket, sessionId: string, opts: UseRecorderOptions,
 
 function emitStartAck(socket: Socket, sessionId: string): Promise<void> {
   return new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error(`server didn't acknowledge start within ${START_ACK_TIMEOUT_MS}ms`));
+    }, START_ACK_TIMEOUT_MS);
     socket.emit("start", { session_id: sessionId }, (resp: { ok: boolean; error?: string }) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
       if (resp?.ok) resolve();
       else reject(new Error(resp?.error || "start failed"));
     });
@@ -139,6 +151,7 @@ export function useRecorder(opts: UseRecorderOptions): RecorderApi {
       pipelineRef.current = await buildAudioPipeline((buf) => {
         if (socket.connected) socket.emit("audio", buf);
       });
+      setState("connecting");
       await emitStartAck(socket, sessionId);
       setState("recording");
     } catch (err) {
