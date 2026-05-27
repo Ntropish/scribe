@@ -42,11 +42,15 @@ interface SpacePayload {
   id: string;
   slug: string;
   name: string;
-  memberRole: "owner" | "editor" | "viewer" | null;
+  isOwner: boolean;
+  memberRole: "maintainer" | "editor" | "viewer" | null;
+  admin: boolean;
 }
 
-function canEditFromRole(role: SpacePayload["memberRole"]): boolean {
-  return role === "owner" || role === "editor";
+function canEditFromSpace(space: SpacePayload | null): boolean {
+  if (!space) return false;
+  if (space.isOwner || space.admin) return true;
+  return space.memberRole === "maintainer" || space.memberRole === "editor";
 }
 
 function toTranscriptLine(line: Line): TranscriptLine {
@@ -315,7 +319,7 @@ function computeFlags(args: {
   session: SessionPayload;
   serverState: SessionState | null;
   recorder: RecorderApi;
-  spaceRole: SpacePayload["memberRole"] | null;
+  space: SpacePayload | null;
   auth: AuthState;
 }): ViewFlags {
   const effectiveState = args.serverState ?? args.session.state;
@@ -324,7 +328,7 @@ function computeFlags(args: {
     effectiveState,
     recorderBusy: recorderIsBusy(args.recorder),
     finalized: effectiveState === "finalized",
-    canEdit: canEditFromRole(args.spaceRole) || isAdmin,
+    canEdit: canEditFromSpace(args.space) || isAdmin,
     isAdmin,
   };
 }
@@ -645,7 +649,7 @@ function SessionDetail() {
     session: data.session,
     serverState: data.serverState,
     recorder,
-    spaceRole: data.space?.memberRole ?? null,
+    space: data.space,
     auth,
   });
   const transcriptLines = Array.from(data.lines.values()).map(toTranscriptLine);

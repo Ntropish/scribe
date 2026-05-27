@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getPostgresClient } from "./infrastructure";
 import { authMiddleware, getAuth, isAdmin, type AuthContext } from "./middleware";
 import {
-  effectiveSpaceRole,
+  effectiveCapability,
   loadSpaceBySlug,
   meetsRole,
   type SpaceRole,
@@ -29,7 +29,7 @@ const patchSchema = z.object({
 });
 
 const grantSchema = z.object({
-  role: z.enum(["owner", "editor", "viewer"]),
+  role: z.enum(["maintainer", "editor", "viewer"]),
 });
 
 const spaces = new Hono<{ Variables: { auth: AuthContext } }>();
@@ -39,6 +39,7 @@ spaces.use("*", authMiddleware);
 spaces.get("/", async (c) => {
   const auth = getAuth(c);
   const sql = getPostgresClient();
+  const admin = isAdmin(auth);
 
   const rows = await sql<{
     id: string;
@@ -54,23 +55,18 @@ spaces.get("/", async (c) => {
     SELECT
       s.id, s.slug, s.name, s.description, s.visibility,
       s.created_by_sub, s.created_at, s.updated_at,
-      CASE
-        WHEN ${isAdmin(auth)} THEN 'owner'
-        WHEN s.created_by_sub = ${auth.subject} THEN 'owner'
-        WHEN s.created_by_sub = ANY(${auth.managedAgents}) THEN 'owner'
-        ELSE sg.role
-      END AS member_role
+      sg.role AS member_role
     FROM spaces s
     LEFT JOIN LATERAL (
       SELECT role
       FROM space_grants
       WHERE space_id = s.id AND group_name = ANY(${auth.groups})
-      ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'editor' THEN 1 ELSE 2 END
+      ORDER BY CASE role WHEN 'maintainer' THEN 0 WHEN 'editor' THEN 1 ELSE 2 END
       LIMIT 1
     ) sg ON true
     WHERE s.archived_at IS NULL
       AND (
-        ${isAdmin(auth)}
+        ${admin}
         OR s.visibility = 'public'
         OR s.created_by_sub = ${auth.subject}
         OR s.created_by_sub = ANY(${auth.managedAgents})
@@ -89,7 +85,9 @@ spaces.get("/", async (c) => {
       createdBySub: r.created_by_sub,
       createdAt: r.created_at,
       updatedAt: r.updated_at,
+      isOwner: r.created_by_sub === auth.subject,
       memberRole: r.member_role,
+      admin,
     })),
   );
 });
@@ -131,7 +129,9 @@ spaces.post("/", async (c) => {
       createdBySub: row.created_by_sub,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
-      memberRole: "owner" as const,
+      isOwner: true,
+      memberRole: null,
+      admin: isAdmin(auth),
     }, 201);
   } catch (err) {
     if (isUniqueViolation(err)) {
@@ -146,11 +146,12 @@ spaces.get("/:slug", async (c) => {
   const space = await loadSpaceBySlug(c.req.param("slug"));
   if (!space || space.archivedAt) return c.json({ error: "not found" }, 404);
 
-  const role = await effectiveSpaceRole(space, auth);
-  if (!meetsRole(role, "viewer") && space.visibility !== "public") {
+  const capability = await effectiveCapability(space, auth);
+  if (!meetsRole(capability, "viewer") && space.visibility !== "public") {
     return c.json({ error: "forbidden" }, 403);
   }
 
+  const memberRole = await loadGrantRoleForCaller(space.id, auth.groups);
   return c.json({
     id: space.id,
     slug: space.slug,
@@ -160,9 +161,27 @@ spaces.get("/:slug", async (c) => {
     createdBySub: space.createdBySub,
     createdAt: space.createdAt,
     updatedAt: space.updatedAt,
-    memberRole: role,
+    isOwner: space.createdBySub === auth.subject,
+    memberRole,
+    admin: isAdmin(auth),
   });
 });
+
+async function loadGrantRoleForCaller(
+  spaceId: string,
+  groups: string[],
+): Promise<SpaceRole | null> {
+  if (groups.length === 0) return null;
+  const sql = getPostgresClient();
+  const rows = await sql<{ role: SpaceRole }[]>`
+    SELECT role
+    FROM space_grants
+    WHERE space_id = ${spaceId} AND group_name = ANY(${groups})
+    ORDER BY CASE role WHEN 'maintainer' THEN 0 WHEN 'editor' THEN 1 ELSE 2 END
+    LIMIT 1
+  `;
+  return rows[0]?.role ?? null;
+}
 
 function isUniqueViolation(err: unknown): boolean {
   if (!err || typeof err !== "object" || !("code" in err)) return false;
@@ -214,8 +233,8 @@ spaces.patch("/:slug", async (c) => {
   const space = await loadSpaceBySlug(c.req.param("slug"));
   if (!space || space.archivedAt) return c.json({ error: "not found" }, 404);
 
-  const role = await effectiveSpaceRole(space, auth);
-  if (!meetsRole(role, "editor")) return c.json({ error: "forbidden" }, 403);
+  const capability = await effectiveCapability(space, auth);
+  if (!meetsRole(capability, "editor")) return c.json({ error: "forbidden" }, 403);
 
   const body = await c.req.json().catch(() => null);
   const parsed = patchSchema.safeParse(body);
@@ -229,6 +248,8 @@ spaces.patch("/:slug", async (c) => {
   const rows = await applySpacePatch(space.id, normalisePatch(parsed.data), auth.subject);
   const row = rows[0];
   if (!row) return c.json({ error: "not found" }, 404);
+
+  const memberRole = await loadGrantRoleForCaller(space.id, auth.groups);
   return c.json({
     id: row.id,
     slug: row.slug,
@@ -238,7 +259,9 @@ spaces.patch("/:slug", async (c) => {
     createdBySub: row.created_by_sub,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    memberRole: role,
+    isOwner: row.created_by_sub === auth.subject,
+    memberRole,
+    admin: isAdmin(auth),
   });
 });
 
@@ -247,8 +270,8 @@ spaces.get("/:slug/grants", async (c) => {
   const space = await loadSpaceBySlug(c.req.param("slug"));
   if (!space || space.archivedAt) return c.json({ error: "not found" }, 404);
 
-  const role = await effectiveSpaceRole(space, auth);
-  if (!meetsRole(role, "viewer")) return c.json({ error: "forbidden" }, 403);
+  const capability = await effectiveCapability(space, auth);
+  if (!meetsRole(capability, "viewer")) return c.json({ error: "forbidden" }, 403);
 
   const sql = getPostgresClient();
   const rows = await sql<{
@@ -277,8 +300,8 @@ spaces.put("/:slug/grants/:group", async (c) => {
   const space = await loadSpaceBySlug(c.req.param("slug"));
   if (!space || space.archivedAt) return c.json({ error: "not found" }, 404);
 
-  const role = await effectiveSpaceRole(space, auth);
-  if (!meetsRole(role, "owner")) return c.json({ error: "forbidden" }, 403);
+  const capability = await effectiveCapability(space, auth);
+  if (!meetsRole(capability, "maintainer")) return c.json({ error: "forbidden" }, 403);
 
   const body = await c.req.json().catch(() => null);
   const parsed = grantSchema.safeParse(body);
@@ -313,8 +336,8 @@ spaces.delete("/:slug/grants/:group", async (c) => {
   const space = await loadSpaceBySlug(c.req.param("slug"));
   if (!space || space.archivedAt) return c.json({ error: "not found" }, 404);
 
-  const role = await effectiveSpaceRole(space, auth);
-  if (!meetsRole(role, "owner")) return c.json({ error: "forbidden" }, 403);
+  const capability = await effectiveCapability(space, auth);
+  if (!meetsRole(capability, "maintainer")) return c.json({ error: "forbidden" }, 403);
 
   const groupName = c.req.param("group");
   const sql = getPostgresClient();

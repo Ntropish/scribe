@@ -77,7 +77,7 @@ async function runSearch(auth: AuthContext, args: SearchArgs): Promise<SearchRow
       SELECT role
       FROM space_grants
       WHERE space_id = sp.id AND group_name = ANY(${auth.groups})
-      ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'editor' THEN 1 ELSE 2 END
+      ORDER BY CASE role WHEN 'maintainer' THEN 0 WHEN 'editor' THEN 1 ELSE 2 END
       LIMIT 1
     ) sg ON true
     WHERE l.text_search @@ websearch_to_tsquery('english', ${args.q})

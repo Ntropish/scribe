@@ -10,7 +10,16 @@ interface Space {
   description: string;
   visibility: "private" | "public";
   createdBySub: string;
-  memberRole: "owner" | "editor" | "viewer" | null;
+  isOwner: boolean;
+  memberRole: "maintainer" | "editor" | "viewer" | null;
+  admin: boolean;
+}
+
+function roleLabel(s: Pick<Space, "isOwner" | "admin" | "memberRole" | "visibility">): string {
+  if (s.isOwner) return "owner";
+  if (s.memberRole) return s.memberRole;
+  if (s.admin) return "admin";
+  return s.visibility === "public" ? "public" : "viewer";
 }
 
 function SpacesList() {
@@ -49,7 +58,7 @@ function SpacesList() {
           {spaces.map((s) => (
             <Link key={s.id} to="/spaces/$slug" params={{ slug: s.slug }} className="scribe-card">
               <div className="scribe-card__title">{s.name}</div>
-              <div className="scribe-card__role">{s.memberRole ?? "public"}</div>
+              <div className="scribe-card__role">{roleLabel(s)}</div>
               {s.description && <div>{s.description}</div>}
             </Link>
           ))}

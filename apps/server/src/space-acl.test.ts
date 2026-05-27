@@ -1,64 +1,64 @@
 import { describe, expect, test } from "bun:test";
-import { createSpaceAcl, deriveEffectiveRole, meetsRole, type AclSql } from "./space-acl";
+import { createSpaceAcl, deriveEffectiveCapability, meetsRole, type AclSql } from "./space-acl";
 
 describe("meetsRole", () => {
   test("null actual never meets any requirement", () => {
     expect(meetsRole(null, "viewer")).toBe(false);
     expect(meetsRole(null, "editor")).toBe(false);
-    expect(meetsRole(null, "owner")).toBe(false);
+    expect(meetsRole(null, "maintainer")).toBe(false);
   });
 
-  test("viewer meets viewer but not editor or owner", () => {
+  test("viewer meets viewer but not editor or maintainer", () => {
     expect(meetsRole("viewer", "viewer")).toBe(true);
     expect(meetsRole("viewer", "editor")).toBe(false);
-    expect(meetsRole("viewer", "owner")).toBe(false);
+    expect(meetsRole("viewer", "maintainer")).toBe(false);
   });
 
-  test("editor meets viewer and editor, not owner", () => {
+  test("editor meets viewer and editor, not maintainer", () => {
     expect(meetsRole("editor", "viewer")).toBe(true);
     expect(meetsRole("editor", "editor")).toBe(true);
-    expect(meetsRole("editor", "owner")).toBe(false);
+    expect(meetsRole("editor", "maintainer")).toBe(false);
   });
 
-  test("owner meets every requirement", () => {
-    expect(meetsRole("owner", "viewer")).toBe(true);
-    expect(meetsRole("owner", "editor")).toBe(true);
-    expect(meetsRole("owner", "owner")).toBe(true);
+  test("maintainer meets every requirement", () => {
+    expect(meetsRole("maintainer", "viewer")).toBe(true);
+    expect(meetsRole("maintainer", "editor")).toBe(true);
+    expect(meetsRole("maintainer", "maintainer")).toBe(true);
   });
 });
 
-describe("deriveEffectiveRole", () => {
+describe("deriveEffectiveCapability", () => {
   const space = { createdBySub: "creator-sub" };
 
-  test("admin always becomes owner", () => {
-    const role = deriveEffectiveRole(
+  test("admin always becomes maintainer", () => {
+    const role = deriveEffectiveCapability(
       space,
       { isAdmin: true, subject: "anyone", managedAgents: [] },
       null,
     );
-    expect(role).toBe("owner");
+    expect(role).toBe("maintainer");
   });
 
-  test("the creator gets owner regardless of group grant", () => {
-    const role = deriveEffectiveRole(
+  test("the creator gets maintainer regardless of group grant", () => {
+    const role = deriveEffectiveCapability(
       space,
       { isAdmin: false, subject: "creator-sub", managedAgents: [] },
       "viewer",
     );
-    expect(role).toBe("owner");
+    expect(role).toBe("maintainer");
   });
 
-  test("a managed-agents match gets owner", () => {
-    const role = deriveEffectiveRole(
+  test("a managed-agents match gets maintainer", () => {
+    const role = deriveEffectiveCapability(
       space,
       { isAdmin: false, subject: "agent-sub", managedAgents: ["creator-sub"] },
       null,
     );
-    expect(role).toBe("owner");
+    expect(role).toBe("maintainer");
   });
 
   test("falls back to the group grant role when no special path applies", () => {
-    const role = deriveEffectiveRole(
+    const role = deriveEffectiveCapability(
       space,
       { isAdmin: false, subject: "stranger", managedAgents: [] },
       "editor",
@@ -67,7 +67,7 @@ describe("deriveEffectiveRole", () => {
   });
 
   test("returns null when nothing matches", () => {
-    const role = deriveEffectiveRole(
+    const role = deriveEffectiveCapability(
       space,
       { isAdmin: false, subject: "stranger", managedAgents: [] },
       null,
@@ -76,8 +76,8 @@ describe("deriveEffectiveRole", () => {
   });
 });
 
-describe("createSpaceAcl.effectiveSpaceRole (with mocked sql)", () => {
-  function makeAcl(grantRole: "owner" | "editor" | "viewer" | null) {
+describe("createSpaceAcl.effectiveCapability (with mocked sql)", () => {
+  function makeAcl(grantRole: "maintainer" | "editor" | "viewer" | null) {
     const calls: Array<{ template: TemplateStringsArray; values: unknown[] }> = [];
     const sql = ((template: TemplateStringsArray, ...values: unknown[]) => {
       calls.push({ template, values });
@@ -88,7 +88,7 @@ describe("createSpaceAcl.effectiveSpaceRole (with mocked sql)", () => {
 
   test("skips the DB lookup when admin", async () => {
     const { acl, calls } = makeAcl(null);
-    const role = await acl.effectiveSpaceRole(
+    const role = await acl.effectiveCapability(
       { id: "s1", createdBySub: "other" },
       {
         type: "user",
@@ -99,13 +99,13 @@ describe("createSpaceAcl.effectiveSpaceRole (with mocked sql)", () => {
         managedAgents: [],
       },
     );
-    expect(role).toBe("owner");
+    expect(role).toBe("maintainer");
     expect(calls).toHaveLength(0);
   });
 
   test("returns the grant role when not admin / owner / managed", async () => {
     const { acl, calls } = makeAcl("editor");
-    const role = await acl.effectiveSpaceRole(
+    const role = await acl.effectiveCapability(
       { id: "s1", createdBySub: "other" },
       {
         type: "user",

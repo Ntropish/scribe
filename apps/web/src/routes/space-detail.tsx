@@ -9,7 +9,9 @@ interface Space {
   name: string;
   description: string;
   visibility: "private" | "public";
-  memberRole: "owner" | "editor" | "viewer" | null;
+  isOwner: boolean;
+  memberRole: "maintainer" | "editor" | "viewer" | null;
+  admin: boolean;
 }
 
 type SessionState = "recording" | "paused" | "stopped" | "finalized";
@@ -21,8 +23,19 @@ interface Session {
   startedAt: string;
 }
 
-function canEdit(role: Space["memberRole"]): boolean {
-  return role === "owner" || role === "editor";
+function canEdit(space: Space): boolean {
+  return space.isOwner || space.admin || space.memberRole === "maintainer" || space.memberRole === "editor";
+}
+
+function canManageMembers(space: Space): boolean {
+  return space.isOwner || space.admin || space.memberRole === "maintainer";
+}
+
+function roleLabel(s: Space): string {
+  if (s.isOwner) return "owner";
+  if (s.memberRole) return s.memberRole;
+  if (s.admin) return "admin";
+  return s.visibility === "public" ? "public" : "viewer";
 }
 
 function SpaceDetail() {
@@ -84,15 +97,15 @@ function SpaceDetail() {
   if (error) return <div className="scribe-error">{error}</div>;
   if (!space) return <p className="scribe-empty">loading</p>;
 
-  const editor = canEdit(space.memberRole);
+  const editor = canEdit(space);
 
   return (
     <>
       <div className="scribe-header">
         <div className="scribe-header__row">
           <h1 style={{ margin: 0 }}>{space.name}</h1>
-          <span className="scribe-card__role">{space.memberRole ?? "public"}</span>
-          {space.memberRole === "owner" && (
+          <span className="scribe-card__role">{roleLabel(space)}</span>
+          {canManageMembers(space) && (
             <Link to="/spaces/$slug/grants" params={{ slug }}>Members</Link>
           )}
         </div>

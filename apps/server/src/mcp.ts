@@ -75,33 +75,31 @@ function registerListSpaces(server: McpServer, auth: AuthContext) {
     },
     async () => {
       const sql = getPostgresClient();
+      const admin = isAdmin(auth);
       const rows = await sql<{
         id: string;
         slug: string;
         name: string;
         description: string;
         visibility: "private" | "public";
-        member_role: string | null;
+        created_by_sub: string;
+        member_role: "maintainer" | "editor" | "viewer" | null;
       }[]>`
         SELECT
           s.id, s.slug, s.name, s.description, s.visibility,
-          CASE
-            WHEN ${isAdmin(auth)} THEN 'owner'
-            WHEN s.created_by_sub = ${auth.subject} THEN 'owner'
-            WHEN s.created_by_sub = ANY(${auth.managedAgents}) THEN 'owner'
-            ELSE sg.role
-          END AS member_role
+          s.created_by_sub,
+          sg.role AS member_role
         FROM spaces s
         LEFT JOIN LATERAL (
           SELECT role
           FROM space_grants
           WHERE space_id = s.id AND group_name = ANY(${auth.groups})
-          ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'editor' THEN 1 ELSE 2 END
+          ORDER BY CASE role WHEN 'maintainer' THEN 0 WHEN 'editor' THEN 1 ELSE 2 END
           LIMIT 1
         ) sg ON true
         WHERE s.archived_at IS NULL
           AND (
-            ${isAdmin(auth)}
+            ${admin}
             OR s.visibility = 'public'
             OR s.created_by_sub = ${auth.subject}
             OR s.created_by_sub = ANY(${auth.managedAgents})
@@ -109,7 +107,18 @@ function registerListSpaces(server: McpServer, auth: AuthContext) {
           )
         ORDER BY s.name ASC
       `;
-      return textResult(rows);
+      return textResult(
+        rows.map((r) => ({
+          id: r.id,
+          slug: r.slug,
+          name: r.name,
+          description: r.description,
+          visibility: r.visibility,
+          is_owner: r.created_by_sub === auth.subject,
+          member_role: r.member_role,
+          admin,
+        })),
+      );
     },
   );
 }
@@ -282,7 +291,7 @@ function registerSearch(server: McpServer, auth: AuthContext) {
           SELECT role
           FROM space_grants
           WHERE space_id = sp.id AND group_name = ANY(${auth.groups})
-          ORDER BY CASE role WHEN 'owner' THEN 0 WHEN 'editor' THEN 1 ELSE 2 END
+          ORDER BY CASE role WHEN 'maintainer' THEN 0 WHEN 'editor' THEN 1 ELSE 2 END
           LIMIT 1
         ) sg ON true
         WHERE l.text_search @@ websearch_to_tsquery('english', ${q})

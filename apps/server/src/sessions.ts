@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getPostgresClient } from "./infrastructure";
 import { authMiddleware, getAuth, isAdmin, type AuthContext } from "./middleware";
 import {
-  effectiveSpaceRole,
+  effectiveCapability,
   loadSpaceBySlug,
   meetsRole,
 } from "./space-acl";
@@ -124,7 +124,7 @@ sessions.get("/spaces/:slug/sessions", async (c) => {
   const space = await loadSpaceBySlug(c.req.param("slug"));
   if (!space || space.archivedAt) return c.json({ error: "not found" }, 404);
 
-  const role = await effectiveSpaceRole(space, auth);
+  const role = await effectiveCapability(space, auth);
   if (!meetsRole(role, "viewer") && space.visibility !== "public") {
     return c.json({ error: "forbidden" }, 403);
   }
@@ -151,7 +151,7 @@ sessions.post("/spaces/:slug/sessions", async (c) => {
   const space = await loadSpaceBySlug(c.req.param("slug"));
   if (!space || space.archivedAt) return c.json({ error: "not found" }, 404);
 
-  const role = await effectiveSpaceRole(space, auth);
+  const role = await effectiveCapability(space, auth);
   if (!meetsRole(role, "editor")) return c.json({ error: "forbidden" }, 403);
 
   const body = await c.req.json().catch(() => null);
@@ -189,7 +189,7 @@ sessions.get("/sessions/:id", async (c) => {
   const space = await loadSpaceBySlug(session.space_slug);
   if (!space || space.archivedAt) return c.json({ error: "not found" }, 404);
 
-  const role = await effectiveSpaceRole(space, auth);
+  const role = await effectiveCapability(space, auth);
   if (!meetsRole(role, "viewer") && space.visibility !== "public") {
     return c.json({ error: "forbidden" }, 403);
   }
@@ -222,7 +222,7 @@ sessions.patch("/sessions/:id", async (c) => {
 
   const space = await loadSpaceBySlug(session.space_slug);
   if (!space || space.archivedAt) return c.json({ error: "not found" }, 404);
-  const role = await effectiveSpaceRole(space, auth);
+  const role = await effectiveCapability(space, auth);
   if (!meetsRole(role, "editor")) return c.json({ error: "forbidden" }, 403);
 
   const body = await c.req.json().catch(() => null);
@@ -268,7 +268,7 @@ sessions.post("/sessions/:id/finalize", async (c) => {
 
   const space = await loadSpaceBySlug(session.space_slug);
   if (!space || space.archivedAt) return c.json({ error: "not found" }, 404);
-  const role = await effectiveSpaceRole(space, auth);
+  const role = await effectiveCapability(space, auth);
   if (!meetsRole(role, "editor")) return c.json({ error: "forbidden" }, 403);
 
   const sql = getPostgresClient();
