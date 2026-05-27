@@ -97,6 +97,17 @@ button:disabled {
   max-width: 64rem;
   margin: 0 auto;
   width: 100%;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+@media (max-width: 480px) {
+  .scribe-main {
+    padding: 0.75rem 1rem;
+  }
 }
 
 .scribe-card-grid {
@@ -146,6 +157,114 @@ button:disabled {
   gap: 1rem;
 }
 
+.scribe-session {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  gap: 0.6rem;
+}
+
+.scribe-session__header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-shrink: 0;
+}
+
+.scribe-session__title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.scribe-session__title h1 {
+  margin: 0;
+  font-size: 1.25rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scribe-session__meta {
+  color: var(--muted);
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.scribe-action-menu {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.scribe-action-menu__trigger {
+  background: transparent;
+  color: var(--fg);
+  border-color: var(--border);
+  width: 2rem;
+  height: 2rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.scribe-action-menu__menu {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  right: 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 0.3rem;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  min-width: 11rem;
+  padding: 0.25rem 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+}
+
+.scribe-action-menu__menu button {
+  background: transparent;
+  color: var(--fg);
+  border: none;
+  border-radius: 0;
+  text-align: left;
+  padding: 0.5rem 0.9rem;
+  cursor: pointer;
+}
+
+.scribe-action-menu__menu button:hover:not(:disabled) {
+  background: var(--border);
+}
+
+.scribe-action-menu__menu button.danger {
+  color: var(--danger);
+}
+
+.scribe-session__controls {
+  flex-shrink: 0;
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+  flex-wrap: wrap;
+  min-height: 2.25rem;
+}
+
+.scribe-session__transcript-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  border-top: 1px solid var(--border);
+  padding-top: 0.6rem;
+  position: relative;
+}
+
 .scribe-state {
   display: inline-block;
   padding: 0.1rem 0.5rem;
@@ -164,7 +283,6 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
-  margin-top: 1rem;
 }
 
 .scribe-line {
