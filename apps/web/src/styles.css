@@ -359,40 +359,27 @@ button:disabled {
   font-size: 0.85rem;
 }
 
-.scribe-session__transcript-area {
-  flex: 1;
-  min-height: 0;
-  position: relative;
-  display: flex;
-  flex-direction: column;
-}
-
 .scribe-session__transcript-scroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   border-top: 1px solid var(--border);
-  padding: 2.5rem 0 3rem;
+  padding: 0.6rem 0;
 }
 
 .scribe-follow-toggle {
-  position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
-  z-index: 3;
-  padding: 0.25rem 0.7rem;
-  border-radius: 1rem;
-  font-size: 0.75rem;
-  font-weight: 500;
-  letter-spacing: 0.02em;
-  background: var(--bg);
+  background: transparent;
   color: var(--muted);
   border: 1px solid var(--border);
-  cursor: pointer;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.3rem;
+  padding: 0;
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
 }
 
 .scribe-follow-toggle--on {
@@ -402,30 +389,6 @@ button:disabled {
 }
 
 .scribe-follow-toggle:hover {
-  filter: brightness(1.08);
-}
-
-.scribe-follow-pill {
-  position: absolute;
-  bottom: 0.75rem;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 0.4rem 1rem;
-  border-radius: 1rem;
-  font-size: 0.85rem;
-  font-weight: 500;
-  background: var(--accent);
-  color: var(--on-primary, white);
-  border: 1px solid var(--accent);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  z-index: 2;
-}
-
-.scribe-follow-pill:hover {
   filter: brightness(1.08);
 }
 

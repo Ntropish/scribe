@@ -1,6 +1,6 @@
 import { Link, createRoute, useParams } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowDown, ChevronLeft, Pause, Play, Square } from "lucide-react";
+import { ChevronLeft, Pause, Pin, PinOff, Play, Square } from "lucide-react";
 import { Route as rootRoute } from "./__root";
 import { api, ApiError } from "../api";
 import { useAuth, type AuthState } from "../auth-context";
@@ -217,6 +217,9 @@ function SessionHeader({
   recorder,
   showRecorder,
   recorderBusy,
+  follow,
+  onActivateFollow,
+  onDeactivateFollow,
   actionItems,
 }: {
   slug: string;
@@ -227,6 +230,9 @@ function SessionHeader({
   recorder: RecorderApi;
   showRecorder: boolean;
   recorderBusy: boolean;
+  follow: boolean;
+  onActivateFollow: () => void;
+  onDeactivateFollow: () => void;
   actionItems: ActionMenuItem[];
 }) {
   const finalized = effectiveState === "finalized";
@@ -254,6 +260,11 @@ function SessionHeader({
           <RecorderControls recorder={recorder} />
         </div>
       )}
+      <FollowToggle
+        follow={follow}
+        onActivate={onActivateFollow}
+        onDeactivate={onDeactivateFollow}
+      />
       <ActionMenu items={actionItems} busy={busy} />
     </div>
   );
@@ -522,26 +533,23 @@ function FollowToggle({
 }) {
   const cls = follow
     ? "scribe-follow-toggle scribe-follow-toggle--on"
-    : "scribe-follow-toggle scribe-follow-toggle--off";
+    : "scribe-follow-toggle";
   return (
     <button
       type="button"
       className={cls}
       aria-pressed={follow}
+      aria-label={follow ? "Pause auto-scroll" : "Resume auto-scroll"}
       title={follow ? "Pause auto-scroll" : "Resume auto-scroll"}
       onClick={follow ? onDeactivate : onActivate}
     >
-      {follow ? <Pause size={12} fill="currentColor" /> : <Play size={12} fill="currentColor" />}
-      <span>{follow ? "Auto-scroll on" : "Auto-scroll off"}</span>
+      {follow ? <Pin size={16} fill="currentColor" /> : <PinOff size={16} />}
     </button>
   );
 }
 
 function TranscriptArea({
   scrollRef,
-  follow,
-  onActivateFollow,
-  onDeactivateFollow,
   spaceSlug,
   sessionId,
   lines,
@@ -550,9 +558,6 @@ function TranscriptArea({
   canEdit,
 }: {
   scrollRef: React.RefObject<HTMLDivElement | null>;
-  follow: boolean;
-  onActivateFollow: () => void;
-  onDeactivateFollow: () => void;
   spaceSlug: string;
   sessionId: string;
   lines: TranscriptLine[];
@@ -561,32 +566,15 @@ function TranscriptArea({
   canEdit: boolean;
 }) {
   return (
-    <div className="scribe-session__transcript-area">
-      <FollowToggle
-        follow={follow}
-        onActivate={onActivateFollow}
-        onDeactivate={onDeactivateFollow}
+    <div className="scribe-session__transcript-scroll" ref={scrollRef}>
+      <TranscriptView
+        spaceSlug={spaceSlug}
+        sessionId={sessionId}
+        lines={lines}
+        partial={partial}
+        finalized={finalized}
+        canEdit={canEdit}
       />
-      <div className="scribe-session__transcript-scroll" ref={scrollRef}>
-        <TranscriptView
-          spaceSlug={spaceSlug}
-          sessionId={sessionId}
-          lines={lines}
-          partial={partial}
-          finalized={finalized}
-          canEdit={canEdit}
-        />
-      </div>
-      {!follow && (
-        <button
-          type="button"
-          className="scribe-follow-pill"
-          onClick={onActivateFollow}
-        >
-          <ArrowDown size={14} />
-          <span>Jump to latest</span>
-        </button>
-      )}
     </div>
   );
 }
@@ -679,14 +667,14 @@ function SessionDetail() {
         recorder={recorder}
         showRecorder={flags.canEdit && !flags.finalized}
         recorderBusy={flags.recorderBusy}
+        follow={autoScroll.follow}
+        onActivateFollow={autoScroll.activate}
+        onDeactivateFollow={autoScroll.deactivate}
         actionItems={actionItems}
       />
       {flags.recorderBusy && <RecorderBusyBanner />}
       <TranscriptArea
         scrollRef={transcriptScrollRef}
-        follow={autoScroll.follow}
-        onActivateFollow={autoScroll.activate}
-        onDeactivateFollow={autoScroll.deactivate}
         spaceSlug={slug}
         sessionId={sessionId}
         lines={transcriptLines}
