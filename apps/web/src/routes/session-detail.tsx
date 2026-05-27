@@ -1,6 +1,6 @@
 import { Link, createRoute, useParams } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronLeft, Pause, Play, Square } from "lucide-react";
+import { ArrowDown, ChevronLeft, Pause, Play, Square } from "lucide-react";
 import { Route as rootRoute } from "./__root";
 import { api, ApiError } from "../api";
 import { useAuth, type AuthState } from "../auth-context";
@@ -544,14 +544,16 @@ function TranscriptArea({
           canEdit={canEdit}
         />
       </div>
-      <button
-        type="button"
-        className={follow ? "scribe-follow-pill scribe-follow-pill--on" : "scribe-follow-pill"}
-        onClick={onActivateFollow}
-        aria-pressed={follow}
-      >
-        {follow ? "Following" : "Follow latest"}
-      </button>
+      {!follow && (
+        <button
+          type="button"
+          className="scribe-follow-pill"
+          onClick={onActivateFollow}
+        >
+          <ArrowDown size={14} />
+          <span>Jump to latest</span>
+        </button>
+      )}
     </div>
   );
 }
