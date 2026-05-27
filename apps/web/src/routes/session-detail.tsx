@@ -11,6 +11,7 @@ import {
   type StateEvent,
 } from "../recorder-hook";
 import { TranscriptView, type TranscriptLine } from "../transcript-view";
+import { useAutoScroll } from "../use-auto-scroll";
 
 type SessionState = "recording" | "paused" | "stopped" | "finalized";
 
@@ -359,6 +360,10 @@ function SessionDetail() {
       await data.loadSession();
     });
 
+  const transcriptScrollRef = useRef<HTMLDivElement | null>(null);
+  const followTrigger = `${data.lines.size}:${partial ? partial.length : 0}`;
+  const autoScroll = useAutoScroll(transcriptScrollRef, followTrigger);
+
   if (data.error) return <div className="scribe-error">{data.error}</div>;
   if (!data.session) return <p className="scribe-empty">loading</p>;
 
@@ -384,15 +389,25 @@ function SessionDetail() {
         onUnfinalize={() => void unfinalize()}
       />
       <RecorderArea flags={flags} recorder={recorder} />
-      <div className="scribe-session__transcript-scroll">
-        <TranscriptView
-          spaceSlug={slug}
-          sessionId={sessionId}
-          lines={transcriptLines}
-          partial={partial}
-          finalized={flags.finalized}
-          canEdit={flags.canEdit}
-        />
+      <div className="scribe-session__transcript-area">
+        <div className="scribe-session__transcript-scroll" ref={transcriptScrollRef}>
+          <TranscriptView
+            spaceSlug={slug}
+            sessionId={sessionId}
+            lines={transcriptLines}
+            partial={partial}
+            finalized={flags.finalized}
+            canEdit={flags.canEdit}
+          />
+        </div>
+        <button
+          type="button"
+          className={`scribe-follow-pill${autoScroll.follow ? " scribe-follow-pill--on" : ""}`}
+          onClick={autoScroll.activate}
+          aria-pressed={autoScroll.follow}
+        >
+          {autoScroll.follow ? "Following" : "Follow latest"}
+        </button>
       </div>
     </div>
   );
