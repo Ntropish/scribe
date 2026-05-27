@@ -337,6 +337,27 @@ button:disabled {
   font-weight: 600;
 }
 
+@media (max-width: 719px) {
+  .scribe-line {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.35rem 0.6rem;
+  }
+
+  .scribe-line__ts {
+    font-size: 0.75rem;
+  }
+
+  .scribe-line .scribe-line__speaker {
+    display: none;
+  }
+
+  .scribe-line__text {
+    overflow-wrap: anywhere;
+  }
+}
+
 .scribe-empty {
   color: var(--muted);
   padding: 1rem 0;

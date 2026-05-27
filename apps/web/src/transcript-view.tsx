@@ -67,7 +67,7 @@ function LineRow({
     <div className="scribe-line" onClick={interactive ? onOpen : undefined} style={style}>
       <div className="scribe-line__ts">{formatMs(line.start_ms)}</div>
       <div className="scribe-line__speaker"></div>
-      <div>{line.text}</div>
+      <div className="scribe-line__text">{line.text}</div>
     </div>
   );
 }
@@ -146,7 +146,7 @@ export function TranscriptView({
         <div className="scribe-line" style={{ opacity: 0.6 }}>
           <div className="scribe-line__ts"></div>
           <div className="scribe-line__speaker">...</div>
-          <div>{partial}</div>
+          <div className="scribe-line__text">{partial}</div>
         </div>
       )}
       {popover && (
