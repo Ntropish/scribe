@@ -1,7 +1,6 @@
 import { Hono } from "hono";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
-import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { authMiddleware, getAuth, isAdmin, type AuthContext } from "./middleware";
 import { getOrigin } from "./well-known";
@@ -331,9 +330,7 @@ mcp.all("/*", async (c, next) => {
 mcp.all("/*", async (c) => {
   const auth = getAuth(c);
   const server = createServer(auth);
-  const transport = new WebStandardStreamableHTTPServerTransport({
-    sessionIdGenerator: () => randomUUID(),
-  });
+  const transport = new WebStandardStreamableHTTPServerTransport();
   await server.connect(transport);
   return transport.handleRequest(c.req.raw);
 });
