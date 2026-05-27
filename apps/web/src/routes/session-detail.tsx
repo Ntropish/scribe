@@ -1,5 +1,6 @@
 import { Link, createRoute, useParams } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ChevronLeft, Pause, Play, Square } from "lucide-react";
 import { Route as rootRoute } from "./__root";
 import { api, ApiError } from "../api";
 import { useAuth, type AuthState } from "../auth-context";
@@ -40,6 +41,7 @@ interface SessionPayload {
 interface SpacePayload {
   id: string;
   slug: string;
+  name: string;
   memberRole: "owner" | "editor" | "viewer" | null;
 }
 
@@ -64,19 +66,12 @@ function describeError(err: unknown): string {
   return String(err);
 }
 
-function ActionMenu({
-  showFinalize,
-  showUnfinalize,
-  busy,
-  onFinalize,
-  onUnfinalize,
-}: {
-  showFinalize: boolean;
-  showUnfinalize: boolean;
-  busy: boolean;
-  onFinalize: () => void;
-  onUnfinalize: () => void;
-}) {
+interface ActionMenuItem {
+  label: string;
+  onClick: () => void;
+}
+
+function ActionMenu({ items, busy }: { items: ActionMenuItem[]; busy: boolean }) {
   const [open, setOpen] = useState(false);
   const wrapperRef = useRef<HTMLDivElement>(null);
 
@@ -89,7 +84,7 @@ function ActionMenu({
     return () => document.removeEventListener("mousedown", handle);
   }, [open]);
 
-  if (!showFinalize && !showUnfinalize) return null;
+  if (items.length === 0) return null;
 
   return (
     <div className="scribe-action-menu" ref={wrapperRef}>
@@ -105,56 +100,134 @@ function ActionMenu({
       </button>
       {open && (
         <div role="menu" className="scribe-action-menu__menu">
-          {showFinalize && (
+          {items.map((item) => (
             <button
+              key={item.label}
               role="menuitem"
               type="button"
               disabled={busy}
               onClick={() => {
                 setOpen(false);
-                onFinalize();
+                item.onClick();
               }}
             >
-              Finalize
+              {item.label}
             </button>
-          )}
-          {showUnfinalize && (
-            <button
-              role="menuitem"
-              type="button"
-              disabled={busy}
-              onClick={() => {
-                setOpen(false);
-                onUnfinalize();
-              }}
-            >
-              Unfinalize
-            </button>
-          )}
+          ))}
         </div>
       )}
     </div>
   );
 }
 
+function RecordButton({
+  onClick,
+  disabled,
+  hint,
+}: {
+  onClick: () => void;
+  disabled?: boolean;
+  hint?: string;
+}) {
+  return (
+    <button
+      type="button"
+      className="scribe-record-btn"
+      aria-label={hint ?? "Record"}
+      title={hint ?? "Record"}
+      onClick={onClick}
+      disabled={disabled}
+    >
+      <span className="scribe-record-btn__dot" />
+    </button>
+  );
+}
+
+function IconButton({
+  label,
+  onClick,
+  icon,
+  variant,
+}: {
+  label: string;
+  onClick: () => void;
+  icon: React.ReactNode;
+  variant?: "primary" | "secondary";
+}) {
+  const cls = variant === "secondary"
+    ? "scribe-icon-btn scribe-icon-btn--secondary"
+    : "scribe-icon-btn";
+  return (
+    <button type="button" className={cls} aria-label={label} title={label} onClick={onClick}>
+      {icon}
+    </button>
+  );
+}
+
+function RecorderControls({ recorder }: { recorder: RecorderApi }) {
+  if (recorder.state === "idle") {
+    return <RecordButton onClick={() => void recorder.start()} />;
+  }
+  if (recorder.state === "requesting_mic") {
+    return <RecordButton onClick={() => {}} disabled hint="Requesting mic" />;
+  }
+  if (recorder.state === "connecting") {
+    return <RecordButton onClick={() => {}} disabled hint="Connecting to transcription service" />;
+  }
+  if (recorder.state === "recording") {
+    return (
+      <>
+        <IconButton label="Pause" onClick={recorder.pause} icon={<Pause size={16} />} variant="secondary" />
+        <IconButton label="Stop" onClick={() => void recorder.stop()} icon={<Square size={16} fill="currentColor" />} variant="secondary" />
+        <span className="scribe-recorder-indicator scribe-recorder-indicator--recording">recording</span>
+      </>
+    );
+  }
+  if (recorder.state === "paused") {
+    return (
+      <>
+        <IconButton label="Resume" onClick={recorder.resume} icon={<Play size={16} fill="currentColor" />} />
+        <IconButton label="Stop" onClick={() => void recorder.stop()} icon={<Square size={16} fill="currentColor" />} variant="secondary" />
+        <span className="scribe-recorder-indicator scribe-recorder-indicator--paused">paused</span>
+      </>
+    );
+  }
+  if (recorder.state === "stopping") {
+    return <span className="scribe-recorder-indicator">stopping</span>;
+  }
+  if (recorder.state === "error") {
+    return (
+      <>
+        <RecordButton onClick={() => void recorder.start()} hint="Retry recording" />
+        {recorder.errorMessage && (
+          <span className="scribe-error scribe-error--inline">{recorder.errorMessage}</span>
+        )}
+      </>
+    );
+  }
+  return null;
+}
+
 function SessionHeader({
   slug,
+  spaceName,
   session,
   effectiveState,
-  canEdit,
-  isAdmin,
   busy,
-  onFinalize,
-  onUnfinalize,
+  recorder,
+  showRecorder,
+  recorderBusy,
+  actionItems,
 }: {
   slug: string;
+  spaceName: string | null;
   session: SessionPayload;
   effectiveState: SessionState;
-  canEdit: boolean;
-  isAdmin: boolean;
   busy: boolean;
-  onFinalize: () => void;
-  onUnfinalize: () => void;
+  recorder: RecorderApi;
+  showRecorder: boolean;
+  recorderBusy: boolean;
+  actionItems: ActionMenuItem[];
 }) {
   const finalized = effectiveState === "finalized";
   const finalizedAtLabel = finalized && session.finalizedAt
@@ -162,63 +235,28 @@ function SessionHeader({
     : `Started ${new Date(session.startedAt).toLocaleString()}`;
   return (
     <div className="scribe-session__header">
-      <Link to="/spaces/$slug" params={{ slug }}>back</Link>
+      <Link
+        to="/spaces/$slug"
+        params={{ slug }}
+        className="scribe-session__back"
+        aria-label={spaceName ? `Back to ${spaceName}` : "Back"}
+      >
+        <ChevronLeft size={16} />
+        <span>{spaceName ?? "Back"}</span>
+      </Link>
       <div className="scribe-session__title">
         <h1>{session.title || "(untitled)"}</h1>
         <span className={`scribe-state scribe-state--${effectiveState}`}>{effectiveState}</span>
         <span className="scribe-session__meta">{finalizedAtLabel}</span>
       </div>
-      <ActionMenu
-        showFinalize={!finalized && canEdit}
-        showUnfinalize={finalized && isAdmin}
-        busy={busy}
-        onFinalize={onFinalize}
-        onUnfinalize={onUnfinalize}
-      />
+      {showRecorder && !recorderBusy && (
+        <div className="scribe-session__recorder">
+          <RecorderControls recorder={recorder} />
+        </div>
+      )}
+      <ActionMenu items={actionItems} busy={busy} />
     </div>
   );
-}
-
-function RecorderControls({ recorder }: { recorder: RecorderApi }) {
-  if (recorder.state === "idle") {
-    return <button onClick={() => void recorder.start()}>Record</button>;
-  }
-  if (recorder.state === "requesting_mic") {
-    return <button disabled>Requesting mic</button>;
-  }
-  if (recorder.state === "connecting") {
-    return <button disabled>Connecting to transcription service...</button>;
-  }
-  if (recorder.state === "recording") {
-    return (
-      <>
-        <button className="secondary" onClick={recorder.pause}>Pause</button>
-        <button className="secondary" onClick={() => void recorder.stop()}>Stop</button>
-        <span style={{ color: "var(--danger)" }}>recording</span>
-      </>
-    );
-  }
-  if (recorder.state === "paused") {
-    return (
-      <>
-        <button onClick={recorder.resume}>Resume</button>
-        <button className="secondary" onClick={() => void recorder.stop()}>Stop</button>
-        <span style={{ color: "var(--muted)" }}>paused</span>
-      </>
-    );
-  }
-  if (recorder.state === "stopping") return <span>stopping</span>;
-  if (recorder.state === "error") {
-    return (
-      <>
-        <button onClick={() => void recorder.start()}>Try again</button>
-        {recorder.errorMessage && (
-          <span className="scribe-error" style={{ padding: "0 0.6rem" }}>{recorder.errorMessage}</span>
-        )}
-      </>
-    );
-  }
-  return null;
 }
 
 function useSessionData(sessionId: string, slug: string) {
@@ -319,44 +357,80 @@ function FinalizeModal({
   );
 }
 
-function RecorderArea({
-  flags,
-  recorder,
-}: {
-  flags: ViewFlags;
-  recorder: RecorderApi;
-}) {
-  if (flags.recorderBusy) {
-    return (
-      <div className="scribe-error">
-        Another client is recording this session.{" "}
-        <button className="secondary" onClick={() => window.location.reload()}>Refresh</button>
-      </div>
-    );
-  }
-  if (flags.finalized || !flags.canEdit) return null;
+function RecorderBusyBanner() {
   return (
-    <div className="scribe-session__controls">
-      <RecorderControls recorder={recorder} />
+    <div className="scribe-error">
+      Another client is recording this session.{" "}
+      <button className="secondary" onClick={() => window.location.reload()}>Refresh</button>
     </div>
   );
 }
 
-function SessionDetail() {
-  const { slug, sessionId } = useParams({ from: "/spaces/$slug/sessions/$sessionId" });
-  const auth = useAuth();
-  const data = useSessionData(sessionId, slug);
-  const { setLines, setServerState } = data;
-  const [partial, setPartial] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [finalizeRequested, setFinalizeRequested] = useState(false);
+function RenameModal({
+  initialTitle,
+  busy,
+  onCancel,
+  onSubmit,
+}: {
+  initialTitle: string;
+  busy: boolean;
+  onCancel: () => void;
+  onSubmit: (title: string) => void;
+}) {
+  const [title, setTitle] = useState(initialTitle);
+  const trimmed = title.trim();
+  const canSubmit = !busy && trimmed.length > 0 && trimmed !== initialTitle.trim();
 
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (canSubmit) onSubmit(trimmed);
+  }
+
+  return (
+    <div
+      className="scribe-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="rename-modal-title"
+      onClick={onCancel}
+    >
+      <form
+        className="scribe-modal__body"
+        onClick={(e) => e.stopPropagation()}
+        onSubmit={handleSubmit}
+      >
+        <h2 id="rename-modal-title" style={{ margin: 0 }}>Rename session</h2>
+        <label>
+          title
+          <input
+            value={title}
+            onChange={(e) => setTitle(e.currentTarget.value)}
+            autoFocus
+            maxLength={500}
+          />
+        </label>
+        <div className="scribe-row" style={{ justifyContent: "flex-end" }}>
+          <button type="button" className="secondary" onClick={onCancel} disabled={busy}>Cancel</button>
+          <button type="submit" disabled={!canSubmit}>
+            {busy ? "Saving..." : "Save"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function useRecorderCallbacks(
+  setLines: (updater: (prev: Map<string, Line>) => Map<string, Line>) => void,
+  setPartial: (text: string | null) => void,
+  setServerState: (state: SessionState) => void,
+) {
   const onLine = useCallback(
     (evt: LineEvent) => {
       setLines((prev) => new Map(prev).set(evt.id, evt));
       setPartial(null);
     },
-    [setLines],
+    [setLines, setPartial],
   );
   const onLineUpdated = useCallback(
     (evt: LineEvent) => {
@@ -364,37 +438,178 @@ function SessionDetail() {
     },
     [setLines],
   );
-  const onPartial = useCallback((evt: PartialEvent) => setPartial(evt.text), []);
+  const onPartial = useCallback((evt: PartialEvent) => setPartial(evt.text), [setPartial]);
   const onState = useCallback(
     (evt: StateEvent) => setServerState(evt.state),
     [setServerState],
   );
+  return { onLine, onLineUpdated, onPartial, onState };
+}
 
-  const recorder = useRecorder({ sessionId, onLine, onLineUpdated, onPartial, onState });
+interface SessionMutations {
+  busy: boolean;
+  confirmFinalize: () => Promise<void>;
+  unfinalize: () => Promise<void>;
+  submitRename: (title: string) => Promise<void>;
+}
 
-  async function withBusy(fn: () => Promise<unknown>) {
+function useSessionMutations(args: {
+  sessionId: string;
+  reload: () => Promise<void>;
+  onError: (message: string) => void;
+  onFinalized: () => void;
+  onRenamed: () => void;
+}): SessionMutations {
+  const [busy, setBusy] = useState(false);
+  const withBusy = async (fn: () => Promise<unknown>) => {
     if (busy) return;
     setBusy(true);
     try {
       await fn();
     } catch (err) {
-      data.setError(describeError(err));
+      args.onError(describeError(err));
     } finally {
       setBusy(false);
     }
-  }
+  };
+  return {
+    busy,
+    confirmFinalize: () =>
+      withBusy(async () => {
+        await api.post(`/api/sessions/${encodeURIComponent(args.sessionId)}/finalize`);
+        await args.reload();
+        args.onFinalized();
+      }),
+    unfinalize: () =>
+      withBusy(async () => {
+        await api.post(`/api/sessions/${encodeURIComponent(args.sessionId)}/unfinalize`);
+        await args.reload();
+      }),
+    submitRename: (title: string) =>
+      withBusy(async () => {
+        await api.patch(`/api/sessions/${encodeURIComponent(args.sessionId)}`, { title });
+        await args.reload();
+        args.onRenamed();
+      }),
+  };
+}
 
-  const confirmFinalize = () =>
-    withBusy(async () => {
-      await api.post(`/api/sessions/${encodeURIComponent(sessionId)}/finalize`);
-      await data.loadSession();
-      setFinalizeRequested(false);
-    });
-  const unfinalize = () =>
-    withBusy(async () => {
-      await api.post(`/api/sessions/${encodeURIComponent(sessionId)}/unfinalize`);
-      await data.loadSession();
-    });
+function buildActionItems(args: {
+  flags: ViewFlags;
+  onRename: () => void;
+  onFinalize: () => void;
+  onUnfinalize: () => void;
+}): ActionMenuItem[] {
+  const items: ActionMenuItem[] = [];
+  if (args.flags.canEdit && !args.flags.finalized) {
+    items.push({ label: "Rename", onClick: args.onRename });
+    items.push({ label: "Finalize", onClick: args.onFinalize });
+  }
+  if (args.flags.finalized && args.flags.isAdmin) {
+    items.push({ label: "Unfinalize", onClick: args.onUnfinalize });
+  }
+  return items;
+}
+
+function TranscriptArea({
+  scrollRef,
+  follow,
+  onActivateFollow,
+  spaceSlug,
+  sessionId,
+  lines,
+  partial,
+  finalized,
+  canEdit,
+}: {
+  scrollRef: React.RefObject<HTMLDivElement | null>;
+  follow: boolean;
+  onActivateFollow: () => void;
+  spaceSlug: string;
+  sessionId: string;
+  lines: TranscriptLine[];
+  partial: string | null;
+  finalized: boolean;
+  canEdit: boolean;
+}) {
+  return (
+    <div className="scribe-session__transcript-area">
+      <div className="scribe-session__transcript-scroll" ref={scrollRef}>
+        <TranscriptView
+          spaceSlug={spaceSlug}
+          sessionId={sessionId}
+          lines={lines}
+          partial={partial}
+          finalized={finalized}
+          canEdit={canEdit}
+        />
+      </div>
+      <button
+        type="button"
+        className={follow ? "scribe-follow-pill scribe-follow-pill--on" : "scribe-follow-pill"}
+        onClick={onActivateFollow}
+        aria-pressed={follow}
+      >
+        {follow ? "Following" : "Follow latest"}
+      </button>
+    </div>
+  );
+}
+
+function SessionModals({
+  finalizeOpen,
+  renameOpen,
+  busy,
+  initialTitle,
+  onCancelFinalize,
+  onConfirmFinalize,
+  onCancelRename,
+  onSubmitRename,
+}: {
+  finalizeOpen: boolean;
+  renameOpen: boolean;
+  busy: boolean;
+  initialTitle: string;
+  onCancelFinalize: () => void;
+  onConfirmFinalize: () => void;
+  onCancelRename: () => void;
+  onSubmitRename: (title: string) => void;
+}) {
+  return (
+    <>
+      {finalizeOpen && (
+        <FinalizeModal busy={busy} onCancel={onCancelFinalize} onConfirm={onConfirmFinalize} />
+      )}
+      {renameOpen && (
+        <RenameModal
+          initialTitle={initialTitle}
+          busy={busy}
+          onCancel={onCancelRename}
+          onSubmit={onSubmitRename}
+        />
+      )}
+    </>
+  );
+}
+
+function SessionDetail() {
+  const { slug, sessionId } = useParams({ from: "/spaces/$slug/sessions/$sessionId" });
+  const auth = useAuth();
+  const data = useSessionData(sessionId, slug);
+  const [partial, setPartial] = useState<string | null>(null);
+  const [finalizeRequested, setFinalizeRequested] = useState(false);
+  const [renameRequested, setRenameRequested] = useState(false);
+
+  const callbacks = useRecorderCallbacks(data.setLines, setPartial, data.setServerState);
+  const recorder = useRecorder({ sessionId, ...callbacks });
+
+  const mutations = useSessionMutations({
+    sessionId,
+    reload: data.loadSession,
+    onError: data.setError,
+    onFinalized: () => setFinalizeRequested(false),
+    onRenamed: () => setRenameRequested(false),
+  });
 
   const transcriptScrollRef = useRef<HTMLDivElement | null>(null);
   const followTrigger = `${data.lines.size}:${partial ? partial.length : 0}`;
@@ -411,47 +626,48 @@ function SessionDetail() {
     auth,
   });
   const transcriptLines = Array.from(data.lines.values()).map(toTranscriptLine);
+  const actionItems = buildActionItems({
+    flags,
+    onRename: () => setRenameRequested(true),
+    onFinalize: () => setFinalizeRequested(true),
+    onUnfinalize: () => void mutations.unfinalize(),
+  });
 
   return (
     <div className="scribe-session">
       <SessionHeader
         slug={slug}
+        spaceName={data.space?.name ?? null}
         session={data.session}
         effectiveState={flags.effectiveState}
-        canEdit={flags.canEdit}
-        isAdmin={flags.isAdmin}
-        busy={busy}
-        onFinalize={() => setFinalizeRequested(true)}
-        onUnfinalize={() => void unfinalize()}
+        busy={mutations.busy}
+        recorder={recorder}
+        showRecorder={flags.canEdit && !flags.finalized}
+        recorderBusy={flags.recorderBusy}
+        actionItems={actionItems}
       />
-      <RecorderArea flags={flags} recorder={recorder} />
-      <div className="scribe-session__transcript-area">
-        <div className="scribe-session__transcript-scroll" ref={transcriptScrollRef}>
-          <TranscriptView
-            spaceSlug={slug}
-            sessionId={sessionId}
-            lines={transcriptLines}
-            partial={partial}
-            finalized={flags.finalized}
-            canEdit={flags.canEdit}
-          />
-        </div>
-        <button
-          type="button"
-          className={`scribe-follow-pill${autoScroll.follow ? " scribe-follow-pill--on" : ""}`}
-          onClick={autoScroll.activate}
-          aria-pressed={autoScroll.follow}
-        >
-          {autoScroll.follow ? "Following" : "Follow latest"}
-        </button>
-      </div>
-      {finalizeRequested && (
-        <FinalizeModal
-          busy={busy}
-          onCancel={() => setFinalizeRequested(false)}
-          onConfirm={() => void confirmFinalize()}
-        />
-      )}
+      {flags.recorderBusy && <RecorderBusyBanner />}
+      <TranscriptArea
+        scrollRef={transcriptScrollRef}
+        follow={autoScroll.follow}
+        onActivateFollow={autoScroll.activate}
+        spaceSlug={slug}
+        sessionId={sessionId}
+        lines={transcriptLines}
+        partial={partial}
+        finalized={flags.finalized}
+        canEdit={flags.canEdit}
+      />
+      <SessionModals
+        finalizeOpen={finalizeRequested}
+        renameOpen={renameRequested}
+        busy={mutations.busy}
+        initialTitle={data.session.title}
+        onCancelFinalize={() => setFinalizeRequested(false)}
+        onConfirmFinalize={() => void mutations.confirmFinalize()}
+        onCancelRename={() => setRenameRequested(false)}
+        onSubmitRename={(title) => void mutations.submitRename(title)}
+      />
     </div>
   );
 }

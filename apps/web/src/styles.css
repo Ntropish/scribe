@@ -170,6 +170,36 @@ button:disabled {
   align-items: center;
   gap: 0.75rem;
   flex-shrink: 0;
+  flex-wrap: wrap;
+}
+
+.scribe-session__back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  color: var(--accent);
+  text-decoration: none;
+  max-width: 14rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scribe-session__back > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scribe-session__back:hover {
+  text-decoration: underline;
+}
+
+.scribe-session__recorder {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
 }
 
 .scribe-session__title {
@@ -247,13 +277,82 @@ button:disabled {
   color: var(--danger);
 }
 
-.scribe-session__controls {
-  flex-shrink: 0;
-  display: flex;
-  gap: 0.6rem;
+.scribe-record-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 50%;
+  padding: 0;
+  display: inline-flex;
   align-items: center;
-  flex-wrap: wrap;
-  min-height: 2.25rem;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.scribe-record-btn:hover:not(:disabled) {
+  background: var(--border);
+}
+
+.scribe-record-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.scribe-record-btn__dot {
+  display: inline-block;
+  width: 0.95rem;
+  height: 0.95rem;
+  background: var(--danger);
+  border-radius: 50%;
+}
+
+.scribe-icon-btn {
+  background: var(--accent);
+  color: white;
+  border: 1px solid var(--accent);
+  width: 2rem;
+  height: 2rem;
+  border-radius: 0.3rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.scribe-icon-btn:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+
+.scribe-icon-btn--secondary {
+  background: transparent;
+  color: var(--fg);
+  border-color: var(--border);
+}
+
+.scribe-icon-btn--secondary:hover:not(:disabled) {
+  background: var(--border);
+  filter: none;
+}
+
+.scribe-recorder-indicator {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.scribe-recorder-indicator--recording {
+  color: var(--danger);
+  font-weight: 500;
+}
+
+.scribe-recorder-indicator--paused {
+  color: var(--muted);
+}
+
+.scribe-error--inline {
+  padding: 0.2rem 0.5rem;
+  font-size: 0.85rem;
 }
 
 .scribe-session__transcript-area {
