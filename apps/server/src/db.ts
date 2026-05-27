@@ -97,6 +97,20 @@ export async function deleteSession(id: string): Promise<void> {
   await sql`DELETE FROM auth_sessions WHERE id = ${id}`;
 }
 
+export async function updateSessionTokens(
+  id: string,
+  accessToken: string,
+  refreshToken: string | null,
+): Promise<void> {
+  const sql = getPostgresClient();
+  await sql`
+    UPDATE auth_sessions
+    SET access_token = ${accessToken},
+        refresh_token = COALESCE(${refreshToken ?? null}, refresh_token)
+    WHERE id = ${id}
+  `;
+}
+
 export async function createOidcLoginState(state: string, codeVerifier: string, redirect: string): Promise<void> {
   const sql = getPostgresClient();
   const expiresAt = new Date(Date.now() + 10 * 60 * 1000);

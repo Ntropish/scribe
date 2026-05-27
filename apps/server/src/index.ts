@@ -14,6 +14,7 @@ import spacesRoutes from "./spaces";
 import sessionsRoutes from "./sessions";
 import speakersRoutes from "./speakers";
 import searchRoutes from "./search";
+import preferencesRoutes from "./preferences";
 import { attachSocketIO } from "./sockets";
 import { cleanupExpired } from "./db";
 
@@ -32,6 +33,7 @@ app.route("/api/spaces", spacesRoutes);
 app.route("/api", sessionsRoutes);
 app.route("/api", speakersRoutes);
 app.route("/api/search", searchRoutes);
+app.route("/api/preferences", preferencesRoutes);
 
 const webDist = join(import.meta.dirname, "..", "..", "web", "dist");
 if (existsSync(webDist)) {
