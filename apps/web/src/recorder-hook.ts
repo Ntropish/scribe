@@ -75,16 +75,7 @@ async function buildAudioPipeline(
   const source = audioCtx.createMediaStreamSource(stream);
   const worklet = new AudioWorkletNode(audioCtx, "scribe-audio-worklet");
   worklet.port.onmessage = (ev) => {
-    if (ev.data instanceof ArrayBuffer) {
-      onChunk(ev.data);
-      return;
-    }
-    if (ev.data && typeof ev.data === "object" && ev.data.type === "gate-stats") {
-      const { sent, gated } = ev.data as { sent: number; gated: number };
-      const total = sent + gated;
-      const pct = total === 0 ? 0 : Math.round((gated / total) * 100);
-      console.log(`[scribe] audio gate: sent=${sent} gated=${gated} (${pct}% suppressed)`);
-    }
+    if (ev.data instanceof ArrayBuffer) onChunk(ev.data);
   };
   source.connect(worklet);
   return { audioCtx, worklet, stream };
