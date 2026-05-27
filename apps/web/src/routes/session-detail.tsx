@@ -285,6 +285,40 @@ function recorderIsBusy(recorder: RecorderApi): boolean {
   return recorder.errorMessage?.startsWith("recorder_busy:") === true;
 }
 
+function FinalizeModal({
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div
+      className="scribe-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="finalize-modal-title"
+      onClick={onCancel}
+    >
+      <div className="scribe-modal__body" onClick={(e) => e.stopPropagation()}>
+        <h2 id="finalize-modal-title" style={{ margin: 0 }}>Finalize this session?</h2>
+        <p style={{ margin: 0 }}>
+          Once finalized, no one can edit lines, speaker mappings, or the session title.
+          An admin can unfinalize the session if needed.
+        </p>
+        <div className="scribe-row" style={{ justifyContent: "flex-end" }}>
+          <button className="secondary" onClick={onCancel} disabled={busy}>Cancel</button>
+          <button onClick={onConfirm} disabled={busy}>
+            {busy ? "Finalizing..." : "Finalize"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function RecorderArea({
   flags,
   recorder,
@@ -315,6 +349,7 @@ function SessionDetail() {
   const { setLines, setServerState } = data;
   const [partial, setPartial] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [finalizeRequested, setFinalizeRequested] = useState(false);
 
   const onLine = useCallback(
     (evt: LineEvent) => {
@@ -349,10 +384,11 @@ function SessionDetail() {
     }
   }
 
-  const finalize = () =>
+  const confirmFinalize = () =>
     withBusy(async () => {
       await api.post(`/api/sessions/${encodeURIComponent(sessionId)}/finalize`);
       await data.loadSession();
+      setFinalizeRequested(false);
     });
   const unfinalize = () =>
     withBusy(async () => {
@@ -385,7 +421,7 @@ function SessionDetail() {
         canEdit={flags.canEdit}
         isAdmin={flags.isAdmin}
         busy={busy}
-        onFinalize={() => void finalize()}
+        onFinalize={() => setFinalizeRequested(true)}
         onUnfinalize={() => void unfinalize()}
       />
       <RecorderArea flags={flags} recorder={recorder} />
@@ -409,6 +445,13 @@ function SessionDetail() {
           {autoScroll.follow ? "Following" : "Follow latest"}
         </button>
       </div>
+      {finalizeRequested && (
+        <FinalizeModal
+          busy={busy}
+          onCancel={() => setFinalizeRequested(false)}
+          onConfirm={() => void confirmFinalize()}
+        />
+      )}
     </div>
   );
 }
