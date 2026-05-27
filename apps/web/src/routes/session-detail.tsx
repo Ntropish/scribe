@@ -511,10 +511,37 @@ function buildActionItems(args: {
   return items;
 }
 
+function FollowToggle({
+  follow,
+  onActivate,
+  onDeactivate,
+}: {
+  follow: boolean;
+  onActivate: () => void;
+  onDeactivate: () => void;
+}) {
+  const cls = follow
+    ? "scribe-follow-toggle scribe-follow-toggle--on"
+    : "scribe-follow-toggle scribe-follow-toggle--off";
+  return (
+    <button
+      type="button"
+      className={cls}
+      aria-pressed={follow}
+      title={follow ? "Pause auto-scroll" : "Resume auto-scroll"}
+      onClick={follow ? onDeactivate : onActivate}
+    >
+      {follow ? <Pause size={12} fill="currentColor" /> : <Play size={12} fill="currentColor" />}
+      <span>{follow ? "Auto-scroll on" : "Auto-scroll off"}</span>
+    </button>
+  );
+}
+
 function TranscriptArea({
   scrollRef,
   follow,
   onActivateFollow,
+  onDeactivateFollow,
   spaceSlug,
   sessionId,
   lines,
@@ -525,6 +552,7 @@ function TranscriptArea({
   scrollRef: React.RefObject<HTMLDivElement | null>;
   follow: boolean;
   onActivateFollow: () => void;
+  onDeactivateFollow: () => void;
   spaceSlug: string;
   sessionId: string;
   lines: TranscriptLine[];
@@ -534,6 +562,11 @@ function TranscriptArea({
 }) {
   return (
     <div className="scribe-session__transcript-area">
+      <FollowToggle
+        follow={follow}
+        onActivate={onActivateFollow}
+        onDeactivate={onDeactivateFollow}
+      />
       <div className="scribe-session__transcript-scroll" ref={scrollRef}>
         <TranscriptView
           spaceSlug={spaceSlug}
@@ -653,6 +686,7 @@ function SessionDetail() {
         scrollRef={transcriptScrollRef}
         follow={autoScroll.follow}
         onActivateFollow={autoScroll.activate}
+        onDeactivateFollow={autoScroll.deactivate}
         spaceSlug={slug}
         sessionId={sessionId}
         lines={transcriptLines}

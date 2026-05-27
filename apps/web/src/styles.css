@@ -372,7 +372,37 @@ button:disabled {
   min-height: 0;
   overflow-y: auto;
   border-top: 1px solid var(--border);
-  padding: 0.6rem 0 3rem;
+  padding: 2.5rem 0 3rem;
+}
+
+.scribe-follow-toggle {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  z-index: 3;
+  padding: 0.25rem 0.7rem;
+  border-radius: 1rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  background: var(--bg);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.scribe-follow-toggle--on {
+  background: var(--accent);
+  color: var(--on-primary, white);
+  border-color: var(--accent);
+}
+
+.scribe-follow-toggle:hover {
+  filter: brightness(1.08);
 }
 
 .scribe-follow-pill {
