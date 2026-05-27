@@ -1,5 +1,5 @@
 import { Link, createRoute, useParams } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Route as rootRoute } from "./__root";
 import { api, ApiError } from "../api";
 import { useAuth, type AuthState } from "../auth-context";
@@ -63,6 +63,79 @@ function describeError(err: unknown): string {
   return String(err);
 }
 
+function ActionMenu({
+  showFinalize,
+  showUnfinalize,
+  busy,
+  onFinalize,
+  onUnfinalize,
+}: {
+  showFinalize: boolean;
+  showUnfinalize: boolean;
+  busy: boolean;
+  onFinalize: () => void;
+  onUnfinalize: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function handle(e: MouseEvent) {
+      if (!wrapperRef.current?.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [open]);
+
+  if (!showFinalize && !showUnfinalize) return null;
+
+  return (
+    <div className="scribe-action-menu" ref={wrapperRef}>
+      <button
+        type="button"
+        className="scribe-action-menu__trigger"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Session actions"
+        onClick={() => setOpen((v) => !v)}
+      >
+        &#x22EE;
+      </button>
+      {open && (
+        <div role="menu" className="scribe-action-menu__menu">
+          {showFinalize && (
+            <button
+              role="menuitem"
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setOpen(false);
+                onFinalize();
+              }}
+            >
+              Finalize
+            </button>
+          )}
+          {showUnfinalize && (
+            <button
+              role="menuitem"
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setOpen(false);
+                onUnfinalize();
+              }}
+            >
+              Unfinalize
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function SessionHeader({
   slug,
   session,
@@ -83,29 +156,24 @@ function SessionHeader({
   onUnfinalize: () => void;
 }) {
   const finalized = effectiveState === "finalized";
+  const finalizedAtLabel = finalized && session.finalizedAt
+    ? `Finalized ${new Date(session.finalizedAt).toLocaleString()}`
+    : `Started ${new Date(session.startedAt).toLocaleString()}`;
   return (
-    <div className="scribe-header">
-      <div className="scribe-header__row">
-        <Link to="/spaces/$slug" params={{ slug }}>back</Link>
-        <h1 style={{ margin: 0 }}>{session.title || "(untitled)"}</h1>
+    <div className="scribe-session__header">
+      <Link to="/spaces/$slug" params={{ slug }}>back</Link>
+      <div className="scribe-session__title">
+        <h1>{session.title || "(untitled)"}</h1>
         <span className={`scribe-state scribe-state--${effectiveState}`}>{effectiveState}</span>
+        <span className="scribe-session__meta">{finalizedAtLabel}</span>
       </div>
-      <div className="scribe-row">
-        <span>Started {new Date(session.startedAt).toLocaleString()}</span>
-        {!finalized && canEdit && (
-          <button onClick={onFinalize} disabled={busy}>Finalize</button>
-        )}
-        {finalized && (
-          <>
-            <span>
-              Finalized {session.finalizedAt ? new Date(session.finalizedAt).toLocaleString() : ""}
-            </span>
-            {isAdmin && (
-              <button className="secondary" onClick={onUnfinalize} disabled={busy}>Unfinalize</button>
-            )}
-          </>
-        )}
-      </div>
+      <ActionMenu
+        showFinalize={!finalized && canEdit}
+        showUnfinalize={finalized && isAdmin}
+        busy={busy}
+        onFinalize={onFinalize}
+        onUnfinalize={onUnfinalize}
+      />
     </div>
   );
 }
@@ -233,7 +301,7 @@ function RecorderArea({
   }
   if (flags.finalized || !flags.canEdit) return null;
   return (
-    <div className="scribe-row" style={{ margin: "0.6rem 0" }}>
+    <div className="scribe-session__controls">
       <RecorderControls recorder={recorder} />
     </div>
   );
@@ -304,7 +372,7 @@ function SessionDetail() {
   const transcriptLines = Array.from(data.lines.values()).map(toTranscriptLine);
 
   return (
-    <>
+    <div className="scribe-session">
       <SessionHeader
         slug={slug}
         session={data.session}
@@ -316,15 +384,17 @@ function SessionDetail() {
         onUnfinalize={() => void unfinalize()}
       />
       <RecorderArea flags={flags} recorder={recorder} />
-      <TranscriptView
-        spaceSlug={slug}
-        sessionId={sessionId}
-        lines={transcriptLines}
-        partial={partial}
-        finalized={flags.finalized}
-        canEdit={flags.canEdit}
-      />
-    </>
+      <div className="scribe-session__transcript-scroll">
+        <TranscriptView
+          spaceSlug={slug}
+          sessionId={sessionId}
+          lines={transcriptLines}
+          partial={partial}
+          finalized={flags.finalized}
+          canEdit={flags.canEdit}
+        />
+      </div>
+    </div>
   );
 }
 
