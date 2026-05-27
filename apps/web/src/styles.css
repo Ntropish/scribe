@@ -256,13 +256,48 @@ button:disabled {
   min-height: 2.25rem;
 }
 
+.scribe-session__transcript-area {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
 .scribe-session__transcript-scroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   border-top: 1px solid var(--border);
   padding-top: 0.6rem;
-  position: relative;
+}
+
+.scribe-follow-pill {
+  position: absolute;
+  bottom: 0.75rem;
+  right: 0.75rem;
+  padding: 0.35rem 0.9rem;
+  border-radius: 1rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, opacity 0.15s;
+  z-index: 2;
+}
+
+.scribe-follow-pill--on {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+  opacity: 0.7;
+}
+
+.scribe-follow-pill--on:hover {
+  opacity: 1;
 }
 
 .scribe-state {
