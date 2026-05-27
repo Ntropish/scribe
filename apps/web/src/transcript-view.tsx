@@ -43,7 +43,7 @@ function GroupHeader({
   const interactive = canEdit && !finalized;
   return (
     <div
-      className="scribe-line__speaker"
+      className="scribe-line__speaker scribe-group-header"
       style={{ padding: "0.2rem 0.6rem", cursor: interactive ? "pointer" : "default" }}
       onClick={interactive ? onOpen : undefined}
       title={interactive ? "Click to assign this speaker" : undefined}
@@ -66,7 +66,7 @@ function LineRow({
   return (
     <div className="scribe-line" onClick={interactive ? onOpen : undefined} style={style}>
       <div className="scribe-line__ts">{formatMs(line.start_ms)}</div>
-      <div className="scribe-line__speaker"></div>
+      <div className="scribe-line__speaker">{line.resolved_speaker}</div>
       <div className="scribe-line__text">{line.text}</div>
     </div>
   );
@@ -260,7 +260,7 @@ function AssignPopover({ spaceSlug, sessionId, state, speakers, onClose, onSpeak
           Label: <code>{state.rawLabel}</code>
         </p>
         <label>
-          existing speaker
+          Existing speaker
           <select value={selectedId} onChange={(e) => setSelectedId(e.currentTarget.value)}>
             {speakers.length === 0 && <option value="">(none yet)</option>}
             {speakers.map((s) => (
@@ -269,7 +269,7 @@ function AssignPopover({ spaceSlug, sessionId, state, speakers, onClose, onSpeak
           </select>
         </label>
         <label>
-          or create new
+          Or create new
           <input
             value={newName}
             onChange={(e) => setNewName(e.currentTarget.value)}

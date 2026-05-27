@@ -98,7 +98,7 @@ function CreateSpaceModal({ onClose, onCreated }: { onClose: () => void; onCreat
       <div className="scribe-modal__body">
         <h2 style={{ margin: 0 }}>New space</h2>
         <label>
-          slug
+          Slug
           <input
             value={slug}
             onChange={(e) => setSlug(e.currentTarget.value)}
@@ -107,11 +107,11 @@ function CreateSpaceModal({ onClose, onCreated }: { onClose: () => void; onCreat
           />
         </label>
         <label>
-          name
+          Name
           <input value={name} onChange={(e) => setName(e.currentTarget.value)} placeholder="My Team" />
         </label>
         <label>
-          description
+          Description
           <textarea
             value={description}
             onChange={(e) => setDescription(e.currentTarget.value)}
@@ -119,10 +119,10 @@ function CreateSpaceModal({ onClose, onCreated }: { onClose: () => void; onCreat
           />
         </label>
         <label>
-          visibility
+          Visibility
           <select value={visibility} onChange={(e) => setVisibility(e.currentTarget.value as "private" | "public")}>
-            <option value="private">private</option>
-            <option value="public">public</option>
+            <option value="private">Private</option>
+            <option value="public">Public</option>
           </select>
         </label>
         {error && <div className="scribe-error">{error}</div>}

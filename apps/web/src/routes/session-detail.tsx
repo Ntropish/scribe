@@ -401,7 +401,7 @@ function RenameModal({
       >
         <h2 id="rename-modal-title" style={{ margin: 0 }}>Rename session</h2>
         <label>
-          title
+          Title
           <input
             value={title}
             onChange={(e) => setTitle(e.currentTarget.value)}
