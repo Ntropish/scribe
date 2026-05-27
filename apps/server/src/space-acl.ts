@@ -1,9 +1,12 @@
 import { getPostgresClient } from "./infrastructure";
 import { isAdmin, type AuthContext } from "./middleware";
 
-export type SpaceRole = "owner" | "editor" | "viewer";
+// Roles that can be granted to a group via space_grants. 'owner' is no longer
+// a grantable role: ownership is recorded on spaces.created_by_sub and is not
+// transferable yet.
+export type SpaceRole = "maintainer" | "editor" | "viewer";
 
-const ROLE_RANK: Record<SpaceRole, number> = { owner: 3, editor: 2, viewer: 1 };
+const ROLE_RANK: Record<SpaceRole, number> = { maintainer: 3, editor: 2, viewer: 1 };
 
 export interface SpaceCore {
   id: string;
@@ -33,8 +36,6 @@ interface GrantRow {
   role: SpaceRole;
 }
 
-// Minimal shape of the postgres-js tagged-template client; tests can pass a
-// matching mock without importing the real type.
 export interface AclSql {
   <T>(template: TemplateStringsArray, ...values: unknown[]): Promise<T>;
 }
@@ -45,16 +46,18 @@ export function meetsRole(actual: SpaceRole | null, required: SpaceRole): boolea
 }
 
 // Pure decision: given the space, the caller, and the role we found in a
-// group_grants lookup (if any), what's the caller's effective role on the space?
-// Extracted so it can be unit tested without a DB.
-export function deriveEffectiveRole(
+// group_grants lookup (if any), what's the caller's effective capability on
+// the space? Admin, the actual creator, and a managed-agent acting for the
+// creator all get the top grantable capability (maintainer); everyone else
+// gets whatever the group grant gave them, or null.
+export function deriveEffectiveCapability(
   space: { createdBySub: string },
   caller: { isAdmin: boolean; subject: string; managedAgents: string[] },
   groupGrantRole: SpaceRole | null,
 ): SpaceRole | null {
-  if (caller.isAdmin) return "owner";
-  if (space.createdBySub === caller.subject) return "owner";
-  if (caller.managedAgents.includes(space.createdBySub)) return "owner";
+  if (caller.isAdmin) return "maintainer";
+  if (space.createdBySub === caller.subject) return "maintainer";
+  if (caller.managedAgents.includes(space.createdBySub)) return "maintainer";
   return groupGrantRole;
 }
 
@@ -99,24 +102,23 @@ export function createSpaceAcl(sql: AclSql) {
       WHERE space_id = ${spaceId}
         AND group_name = ANY(${groups})
       ORDER BY
-        CASE role WHEN 'owner' THEN 0 WHEN 'editor' THEN 1 ELSE 2 END
+        CASE role WHEN 'maintainer' THEN 0 WHEN 'editor' THEN 1 ELSE 2 END
       LIMIT 1
     `;
     return rows[0]?.role ?? null;
   }
 
-  async function effectiveSpaceRole(
+  async function effectiveCapability(
     space: { id: string; createdBySub: string },
     auth: AuthContext,
   ): Promise<SpaceRole | null> {
-    const callerIsAdmin = isAdmin(auth);
-    if (callerIsAdmin) return "owner";
-    if (space.createdBySub === auth.subject) return "owner";
-    if (auth.managedAgents.includes(space.createdBySub)) return "owner";
+    if (isAdmin(auth)) return "maintainer";
+    if (space.createdBySub === auth.subject) return "maintainer";
+    if (auth.managedAgents.includes(space.createdBySub)) return "maintainer";
     return lookupGroupGrantRole(space.id, auth.groups);
   }
 
-  return { loadSpaceBySlug, loadSpaceById, lookupGroupGrantRole, effectiveSpaceRole };
+  return { loadSpaceBySlug, loadSpaceById, lookupGroupGrantRole, effectiveCapability };
 }
 
 let defaultAcl: ReturnType<typeof createSpaceAcl> | null = null;
@@ -127,7 +129,7 @@ function getDefaultAcl(): ReturnType<typeof createSpaceAcl> {
 
 export const loadSpaceBySlug = (slug: string) => getDefaultAcl().loadSpaceBySlug(slug);
 export const loadSpaceById = (id: string) => getDefaultAcl().loadSpaceById(id);
-export const effectiveSpaceRole = (
+export const effectiveCapability = (
   space: { id: string; createdBySub: string },
   auth: AuthContext,
-) => getDefaultAcl().effectiveSpaceRole(space, auth);
+) => getDefaultAcl().effectiveCapability(space, auth);

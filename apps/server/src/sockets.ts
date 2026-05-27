@@ -6,7 +6,7 @@ import { env } from "./env";
 import { getPostgresClient } from "./infrastructure";
 import { getSession, getUser } from "./db";
 import {
-  effectiveSpaceRole,
+  effectiveCapability,
   loadSpaceById,
   meetsRole,
   type SpaceCore,
@@ -335,7 +335,7 @@ async function handleJoin(io: IO, socket: ServerSocket, payload: unknown, ack: A
   }
   const ctx = await loadSpaceForSession(parsed.data.session_id);
   if (!ctx) return emitErr(socket, "not_found", "session not found", ack);
-  const role = await effectiveSpaceRole(ctx.space, socket.data.auth);
+  const role = await effectiveCapability(ctx.space, socket.data.auth);
   if (!meetsRole(role, "viewer") && ctx.space.visibility !== "public") {
     return emitErr(socket, "not_authorized", "no access to this space", ack);
   }
@@ -377,7 +377,7 @@ async function guardStart(
     emitErr(socket, "session_finalized", "session is finalized", ack);
     return null;
   }
-  const role = await effectiveSpaceRole(ctx.space, socket.data.auth);
+  const role = await effectiveCapability(ctx.space, socket.data.auth);
   if (!meetsRole(role, "editor")) {
     emitErr(socket, "not_authorized", "editor role required to record", ack);
     return null;

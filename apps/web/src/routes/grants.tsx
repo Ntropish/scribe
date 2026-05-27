@@ -6,7 +6,7 @@ import { api, ApiError } from "../api";
 interface Grant {
   id: string;
   groupName: string;
-  role: "owner" | "editor" | "viewer";
+  role: "maintainer" | "editor" | "viewer";
   createdAt: string;
 }
 
@@ -15,7 +15,7 @@ function Grants() {
   const [grants, setGrants] = useState<Grant[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [groupInput, setGroupInput] = useState("");
-  const [roleInput, setRoleInput] = useState<"owner" | "editor" | "viewer">("viewer");
+  const [roleInput, setRoleInput] = useState<"maintainer" | "editor" | "viewer">("viewer");
 
   const load = useCallback(async () => {
     try {
@@ -32,7 +32,7 @@ function Grants() {
     void load();
   }, [load]);
 
-  async function setGrant(group: string, role: "owner" | "editor" | "viewer") {
+  async function setGrant(group: string, role: "maintainer" | "editor" | "viewer") {
     try {
       await api.put<Grant>(`/api/spaces/${encodeURIComponent(slug)}/grants/${encodeURIComponent(group)}`, { role });
       await load();
@@ -65,10 +65,10 @@ function Grants() {
           value={groupInput}
           onChange={(e) => setGroupInput(e.currentTarget.value)}
         />
-        <select value={roleInput} onChange={(e) => setRoleInput(e.currentTarget.value as "owner" | "editor" | "viewer")}>
+        <select value={roleInput} onChange={(e) => setRoleInput(e.currentTarget.value as "maintainer" | "editor" | "viewer")}>
           <option value="viewer">viewer</option>
           <option value="editor">editor</option>
-          <option value="owner">owner</option>
+          <option value="maintainer">maintainer</option>
         </select>
         <button
           disabled={!groupInput}
@@ -85,7 +85,7 @@ function Grants() {
       {!grants ? (
         <p className="scribe-empty">loading</p>
       ) : grants.length === 0 ? (
-        <p className="scribe-empty">No group grants yet. The space creator has implicit owner access.</p>
+        <p className="scribe-empty">No group grants yet. The space creator is the owner; grants extend access to additional groups.</p>
       ) : (
         <table className="scribe-table">
           <thead>
@@ -98,11 +98,11 @@ function Grants() {
                 <td>
                   <select
                     value={g.role}
-                    onChange={(e) => void setGrant(g.groupName, e.currentTarget.value as "owner" | "editor" | "viewer")}
+                    onChange={(e) => void setGrant(g.groupName, e.currentTarget.value as "maintainer" | "editor" | "viewer")}
                   >
                     <option value="viewer">viewer</option>
                     <option value="editor">editor</option>
-                    <option value="owner">owner</option>
+                    <option value="maintainer">maintainer</option>
                   </select>
                 </td>
                 <td>

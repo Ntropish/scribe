@@ -3,7 +3,7 @@ import { z } from "zod";
 import { getPostgresClient } from "./infrastructure";
 import { authMiddleware, getAuth, type AuthContext } from "./middleware";
 import {
-  effectiveSpaceRole,
+  effectiveCapability,
   loadSpaceBySlug,
   loadSpaceById,
   meetsRole,
@@ -100,7 +100,7 @@ speakers.get("/spaces/:slug/speakers", async (c) => {
   const auth = getAuth(c);
   const space = await loadSpaceBySlug(c.req.param("slug"));
   if (!space || space.archivedAt) return c.json({ error: "not found" }, 404);
-  const role = await effectiveSpaceRole(space, auth);
+  const role = await effectiveCapability(space, auth);
   if (!meetsRole(role, "viewer") && space.visibility !== "public") {
     return c.json({ error: "forbidden" }, 403);
   }
@@ -118,7 +118,7 @@ speakers.post("/spaces/:slug/speakers", async (c) => {
   const auth = getAuth(c);
   const space = await loadSpaceBySlug(c.req.param("slug"));
   if (!space || space.archivedAt) return c.json({ error: "not found" }, 404);
-  const role = await effectiveSpaceRole(space, auth);
+  const role = await effectiveCapability(space, auth);
   if (!meetsRole(role, "editor")) return c.json({ error: "forbidden" }, 403);
 
   const body = await c.req.json().catch(() => null);
@@ -148,7 +148,7 @@ speakers.delete("/spaces/:slug/speakers/:id", async (c) => {
   const auth = getAuth(c);
   const space = await loadSpaceBySlug(c.req.param("slug"));
   if (!space || space.archivedAt) return c.json({ error: "not found" }, 404);
-  const role = await effectiveSpaceRole(space, auth);
+  const role = await effectiveCapability(space, auth);
   if (!meetsRole(role, "editor")) return c.json({ error: "forbidden" }, 403);
 
   const sql = getPostgresClient();
@@ -183,7 +183,7 @@ speakers.put("/spaces/:slug/speaker-mappings/:rawLabel", async (c) => {
   const auth = getAuth(c);
   const space = await loadSpaceBySlug(c.req.param("slug"));
   if (!space || space.archivedAt) return c.json({ error: "not found" }, 404);
-  const role = await effectiveSpaceRole(space, auth);
+  const role = await effectiveCapability(space, auth);
   if (!meetsRole(role, "editor")) return c.json({ error: "forbidden" }, 403);
 
   const body = await c.req.json().catch(() => null);
@@ -256,7 +256,7 @@ speakers.put("/sessions/:id/speaker-mappings/:rawLabel", async (c) => {
   }
   const space = await loadSpaceById(session.space_id);
   if (!space || space.archivedAt) return c.json({ error: "not found" }, 404);
-  const role = await effectiveSpaceRole(space, auth);
+  const role = await effectiveCapability(space, auth);
   if (!meetsRole(role, "editor")) return c.json({ error: "forbidden" }, 403);
 
   const body = await c.req.json().catch(() => null);
@@ -321,7 +321,7 @@ speakers.put("/lines/:id/speaker", async (c) => {
   }
   const space = await loadSpaceById(session.space_id);
   if (!space || space.archivedAt) return c.json({ error: "not found" }, 404);
-  const role = await effectiveSpaceRole(space, auth);
+  const role = await effectiveCapability(space, auth);
   if (!meetsRole(role, "editor")) return c.json({ error: "forbidden" }, 403);
 
   if (parsed.data.speaker_id !== null) {
