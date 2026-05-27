@@ -1,21 +1,25 @@
 :root {
   font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   color-scheme: light dark;
-  --bg: #ffffff;
-  --fg: #1a1a1a;
-  --muted: #666;
+  /* Theme client (Auth Core) sets --surface, --on-surface, --primary,
+     --border, --danger, etc. on documentElement.style at runtime. We
+     alias scribe's vars to those so the user's theme drives the page;
+     literals are fallbacks for the brief window before the theme loads. */
+  --bg: var(--surface, #ffffff);
+  --fg: var(--on-surface, #1a1a1a);
+  --muted: var(--on-surface-muted, #666);
   --border: #d0d0d0;
-  --accent: #2563eb;
+  --accent: var(--primary, #2563eb);
   --danger: #c92626;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #0d0d10;
-    --fg: #e6e6e6;
-    --muted: #999;
+    --bg: var(--surface, #0d0d10);
+    --fg: var(--on-surface, #e6e6e6);
+    --muted: var(--on-surface-muted, #999);
     --border: #2c2c33;
-    --accent: #6098ff;
+    --accent: var(--primary, #6098ff);
     --danger: #f57171;
   }
 }
@@ -436,24 +440,47 @@ button:disabled {
   font-weight: 600;
 }
 
+/* Desktop: the group header above each run already shows the speaker,
+   so the per-line speaker cell is hidden but kept as a layout column
+   for column alignment. */
+.scribe-line > .scribe-line__speaker {
+  visibility: hidden;
+}
+
 @media (max-width: 719px) {
   .scribe-line {
-    display: flex;
-    flex-direction: column;
-    gap: 0.15rem;
-    padding: 0.35rem 0.6rem;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-areas:
+      "speaker ts"
+      "text text";
+    gap: 0.1rem 0.5rem;
+    padding: 0.4rem 0.6rem 0.5rem;
   }
 
   .scribe-line__ts {
+    grid-area: ts;
+    text-align: right;
     font-size: 0.75rem;
+    align-self: center;
   }
 
-  .scribe-line .scribe-line__speaker {
-    display: none;
+  .scribe-line > .scribe-line__speaker {
+    visibility: visible;
+    grid-area: speaker;
+    font-size: 0.85rem;
+    align-self: center;
   }
 
   .scribe-line__text {
+    grid-area: text;
     overflow-wrap: anywhere;
+  }
+
+  /* Group header is redundant on mobile because each line shows its
+     own speaker; the per-line label is the source of truth. */
+  .scribe-group-header {
+    display: none;
   }
 }
 
@@ -486,7 +513,27 @@ button:disabled {
   border: 1px solid var(--border);
   display: flex;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.85rem;
+}
+
+.scribe-modal__body label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+
+.scribe-modal__body label input,
+.scribe-modal__body label textarea,
+.scribe-modal__body label select {
+  width: 100%;
+  font-weight: 400;
+  font-size: 0.95rem;
+  color: var(--fg);
+  letter-spacing: normal;
 }
 
 .scribe-table {
