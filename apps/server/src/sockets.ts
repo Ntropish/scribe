@@ -390,6 +390,7 @@ async function guardStart(
 }
 
 const SERVICE_WS_OPEN_TIMEOUT_MS = 5000;
+const SERVICE_READY_TIMEOUT_MS = 5000;
 
 function openServiceWs(url: string): Promise<WebSocket> {
   return new Promise<WebSocket>((resolve, reject) => {
@@ -414,6 +415,48 @@ function openServiceWs(url: string): Promise<WebSocket> {
   });
 }
 
+// The TCP/WS handshake completing doesn't mean whisper-stream is ready to
+// transcribe; the service emits a {type:"ready"} JSON frame once its start
+// handler has loaded and is willing to accept audio. Block on that frame
+// before letting the rest of handleStart announce "recording" to the client.
+function waitForReady(ws: WebSocket, timeoutMs: number): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const onMessage = (raw: Buffer | ArrayBuffer | Buffer[], isBinary: boolean) => {
+      if (settled || isBinary) return;
+      let text: string;
+      if (Array.isArray(raw)) text = Buffer.concat(raw).toString("utf8");
+      else if (Buffer.isBuffer(raw)) text = raw.toString("utf8");
+      else text = Buffer.from(raw).toString("utf8");
+      let frame: { type?: string };
+      try {
+        frame = JSON.parse(text) as { type?: string };
+      } catch {
+        return;
+      }
+      if (frame.type === "ready") finish(null);
+    };
+    const onClose = () => finish(new Error("whisper-stream closed before sending ready"));
+    const onError = (err: Error) => finish(err);
+    const timer = setTimeout(
+      () => finish(new Error(`whisper-stream did not become ready within ${timeoutMs}ms`)),
+      timeoutMs,
+    );
+    function finish(err: Error | null) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      ws.off("message", onMessage);
+      ws.off("close", onClose);
+      ws.off("error", onError);
+      err ? reject(err) : resolve();
+    }
+    ws.on("message", onMessage);
+    ws.once("close", onClose);
+    ws.once("error", onError);
+  });
+}
+
 async function handleStart(io: IO, socket: ServerSocket, payload: unknown, ack: AckFn | undefined) {
   console.warn(`[scribe] start: enter socket=${socket.id} url=${env.whisperStreamUrl}`);
   const ctx = await guardStart(socket, payload, ack);
@@ -435,6 +478,18 @@ async function handleStart(io: IO, socket: ServerSocket, payload: unknown, ack: 
     ...(ctx.language ? { language: ctx.language } : {}),
     space_id: ctx.session.space_id,
   }));
+  try {
+    await waitForReady(ws, SERVICE_READY_TIMEOUT_MS);
+  } catch (err) {
+    console.error("[scribe] whisper-stream did not become ready:", err);
+    try {
+      ws.close();
+    } catch {
+      // ignore
+    }
+    return emitErr(socket, "service_unavailable", "whisper-stream did not become ready", ack);
+  }
+  console.warn("[scribe] start: whisper-stream ready, creating capture");
   const capture = await createCaptureRow(ctx.session.id);
   const nextIdx = await nextLineIndex(ctx.session.id);
   console.warn(`[scribe] start: capture ${capture.id} created, acking`);
