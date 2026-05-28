@@ -167,7 +167,27 @@ export function useRecorder(opts: UseRecorderOptions): RecorderApi {
       setErrorMessage(msg);
       if (msg.startsWith("recorder_busy:")) setState("error");
     });
-    socket.on("state", (evt: StateEvent) => setRecorderSocketId(evt.recorder_socket_id));
+    socket.on("state", (evt: StateEvent) => {
+      setRecorderSocketId(evt.recorder_socket_id);
+      // The server is authoritative about whether this session is being
+      // recorded. If it transitions to a non-recording state while we still
+      // believe we're the active recorder, the upstream capture died on us
+      // (e.g. whisper-stream disconnected). Release the mic and surface an
+      // error so the controls can't keep claiming we're recording.
+      if (evt.state === "stopped" || evt.state === "finalized") {
+        setState((prev) => {
+          if (prev !== "recording" && prev !== "paused") return prev;
+          teardownPipeline(pipelineRef.current);
+          pipelineRef.current = null;
+          setErrorMessage(
+            evt.state === "finalized"
+              ? "session was finalized"
+              : "recording ended: transcription service disconnected",
+          );
+          return "error";
+        });
+      }
+    });
     return () => {
       socket.disconnect();
       socketRef.current = null;
